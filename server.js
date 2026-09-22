@@ -1,7 +1,10 @@
 import express from "express";
+import { sendSms, getIncomingSms, getSmsOutLog } from "./lib/call2all.js";
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+app.use(express.json());
 
 app.get("/", (req, res) => {
   res.json({ status: "ok", service: "judaica-stam" });
@@ -9,6 +12,75 @@ app.get("/", (req, res) => {
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
+});
+
+// שליחת SMS — הטוקן נשאר בשרת, לעולם לא בקליינט
+app.post("/api/sms/send", async (req, res) => {
+  const { phone, message } = req.body || {};
+  if (!phone || !message) {
+    res.status(400).json({ error: "phone ו-message נדרשים" });
+    return;
+  }
+  try {
+    const data = await sendSms(phone, message);
+    res.json(data);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// הודעות נכנסות אחרונות
+app.get("/api/sms/incoming", async (req, res) => {
+  try {
+    const rows = await getIncomingSms({
+      limit: req.query.limit,
+      startDate: req.query.startDate,
+      endDate: req.query.endDate,
+    });
+    res.json({ rows });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// יומן הודעות יוצאות
+app.get("/api/sms/outgoing", async (req, res) => {
+  try {
+    const rows = await getSmsOutLog({ limit: req.query.limit });
+    res.json({ rows });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// שיחה מול מספר טלפון ספציפי — כל הנכנסות + כל היוצאות אליו/ממנו, ממוינות לפי זמן
+const normalizePhone = (p) => (p || "").replace(/\D/g, "").replace(/^972/, "0");
+
+app.get("/api/sms/conversation", async (req, res) => {
+  const phone = req.query.phone;
+  if (!phone) {
+    res.status(400).json({ error: "phone נדרש" });
+    return;
+  }
+  const target = normalizePhone(phone);
+  try {
+    const [incoming, outgoing] = await Promise.all([
+      getIncomingSms({ limit: req.query.limit || 3000 }),
+      getSmsOutLog({ limit: req.query.limit }),
+    ]);
+    const inbound = incoming
+      .filter((r) => normalizePhone(r.source) === target)
+      .map((r) => ({ direction: "in", message: r.message, time: r.receive_date }));
+    const outbound = outgoing
+      .filter((r) => normalizePhone(r.To) === target)
+      .map((r) => ({ direction: "out", message: r.Message, time: r.Time, deliveryReport: r.DeliveryReport }));
+    const conversation = [...inbound, ...outbound].sort(
+      (a, b) => new Date(a.time) - new Date(b.time)
+    );
+    res.json({ phone: target, conversation });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
 });
 
 app.listen(port, () => {
