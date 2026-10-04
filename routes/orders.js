@@ -1,6 +1,7 @@
 import express from "express";
 import { pool } from "../lib/db.js";
 import { requireApiKey } from "../lib/apiKey.js";
+import { asyncHandler } from "../lib/asyncHandler.js";
 
 export const router = express.Router();
 router.use(requireApiKey);
@@ -17,7 +18,7 @@ const ITEM_TYPES = [
 ];
 
 // יצירת הזמנה + שקיות. מספר הלקוח קבוע: אם קיים — נעשה שימוש בלקוח הקיים, אחרת נוצר חדש.
-router.post("/", async (req, res) => {
+router.post("/", asyncHandler(async (req, res) => {
   const { order_number, customer, bags } = req.body || {};
   if (!order_number || !customer?.customer_number || !Array.isArray(bags) || bags.length === 0) {
     res.status(400).json({ error: "order_number, customer.customer_number ו-bags נדרשים" });
@@ -74,12 +75,12 @@ router.post("/", async (req, res) => {
   } finally {
     client.release();
   }
-});
+}));
 
 // צפייה בהזמנה — לבדיקה/שימוש פנימי
-router.get("/:order_number", async (req, res) => {
+router.get("/:order_number", asyncHandler(async (req, res) => {
   const o = await pool.query(
-    `select o.order_number, o.status, c.customer_number, c.first_name, c.last_name, c.phone, c.address
+    `select o.id, o.order_number, o.status, c.customer_number, c.first_name, c.last_name, c.phone, c.address
      from orders o join customers c on c.id = o.customer_id
      where o.order_number = $1`,
     [req.params.order_number]
@@ -90,9 +91,22 @@ router.get("/:order_number", async (req, res) => {
   }
   const bags = await pool.query(
     `select bag_code, item_type, item_type_note, quantity, status, result, picked_up_at, returned_at
-     from bags b join orders o on o.id = b.order_id
-     where o.order_number = $1 order by bag_code`,
+     from bags where order_id = $1 order by bag_code`,
+    [o.rows[0].id]
+  );
+  const { id, ...order } = o.rows[0];
+  res.json({ ...order, bags: bags.rows });
+}));
+
+// מחיקת הזמנה (ושקיותיה) — לשימוש פנימי/ניקוי נתוני בדיקה
+router.delete("/:order_number", asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    "delete from orders where order_number = $1 returning id",
     [req.params.order_number]
   );
-  res.json({ ...o.rows[0], bags: bags.rows });
-});
+  if (rows.length === 0) {
+    res.status(404).json({ error: "הזמנה לא נמצאה" });
+    return;
+  }
+  res.json({ deleted: req.params.order_number });
+}));

@@ -1,6 +1,7 @@
 import express from "express";
 import { pool } from "../lib/db.js";
 import { requireApiKey } from "../lib/apiKey.js";
+import { asyncHandler } from "../lib/asyncHandler.js";
 
 export const router = express.Router();
 router.use(requireApiKey);
@@ -39,17 +40,17 @@ function serializeBag(bag) {
 }
 
 // פרטי שקית — לפי קוד ברקוד
-router.get("/bag/:code", async (req, res) => {
+router.get("/bag/:code", asyncHandler(async (req, res) => {
   const bag = await loadBag(req.params.code);
   if (!bag) {
     res.status(404).json({ error: "קוד לא מוכר" });
     return;
   }
   res.json(serializeBag(bag));
-});
+}));
 
 // עדכון סטטוס — מזהה לבד אם זו מסירה (איסוף) או החזרה, לפי מצב השקית הנוכחי
-router.post("/scan", async (req, res) => {
+router.post("/scan", asyncHandler(async (req, res) => {
   const { bag_code, result } = req.body || {};
   if (!bag_code) {
     res.status(400).json({ error: "bag_code נדרש" });
@@ -94,4 +95,4 @@ router.post("/scan", async (req, res) => {
     return;
   }
   res.status(409).json({ error: "השקית כבר הוחזרה" });
-});
+}));

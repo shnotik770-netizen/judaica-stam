@@ -96,6 +96,12 @@ app.get("/api/sms/conversation", async (req, res) => {
   }
 });
 
+// רשת ביטחון אחרונה: שגיאה שלא נתפסה בתוך route מחזירה 500 במקום להפיל את השרת
+app.use((err, req, res, next) => {
+  console.error("unhandled route error", err);
+  res.status(500).json({ error: "שגיאת שרת" });
+});
+
 async function start() {
   if (process.env.DATABASE_URL) {
     await migrate();
