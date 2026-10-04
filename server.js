@@ -1,5 +1,9 @@
 import express from "express";
 import { sendSms, getIncomingSms, getSmsOutLog } from "./lib/call2all.js";
+import { migrate } from "./db/migrate.js";
+import { router as supplierRouter } from "./routes/supplier.js";
+import { router as ordersRouter } from "./routes/orders.js";
+import { router as labelsRouter } from "./routes/labels.js";
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -13,6 +17,15 @@ app.get("/", (req, res) => {
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
+
+// ספק סת"ם (יודאיקה פלוס) — פרטי שקית + עדכון סטטוס
+app.use("/api/supplier", supplierRouter);
+
+// צוות פנימי — יצירת הזמנות/שקיות
+app.use("/api/orders", ordersRouter);
+
+// מדבקות ברקוד
+app.use("/api/label", labelsRouter);
 
 // שליחת SMS — הטוקן נשאר בשרת, לעולם לא בקליינט
 app.post("/api/sms/send", async (req, res) => {
@@ -83,6 +96,15 @@ app.get("/api/sms/conversation", async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`judaica-stam listening on port ${port}`);
-});
+async function start() {
+  if (process.env.DATABASE_URL) {
+    await migrate();
+  } else {
+    console.warn("DATABASE_URL לא מוגדר — מדלג על מיגרציה");
+  }
+  app.listen(port, () => {
+    console.log(`judaica-stam listening on port ${port}`);
+  });
+}
+
+start();

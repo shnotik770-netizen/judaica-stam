@@ -5,9 +5,13 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "migrate": "node db/migrate.js",
+    "generate-key": "node scripts/generate-api-key.js"
   },
   "dependencies": {
-    "express": "^4.19.2"
+    "bwip-js": "^4.5.1",
+    "express": "^4.19.2",
+    "pg": "^8.13.1"
   }
 }
