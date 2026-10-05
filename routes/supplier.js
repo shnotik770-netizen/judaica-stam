@@ -80,7 +80,36 @@ router.get("/bag/:code", asyncHandler(async (req, res) => {
   res.json(serializeBag(bag));
 }));
 
-// עדכון סטטוס — מזהה לבד אם זו מסירה (איסוף) או החזרה, לפי מצב השקית הנוכחי
+// מבצע בפועל מסירה (איסוף) — פתוח/הצטרפות ל"איסוף" + עדכון השקית, בטרנזקציה אחת.
+async function pickupBag(bagId) {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const collectionId = await getOrCreateCollection(client);
+    await client.query(
+      `update bags set status='with_supplier', picked_up_at=now(), collection_id=$2, updated_at=now()
+       where id=$1`,
+      [bagId, collectionId]
+    );
+    await client.query("commit");
+  } catch (e) {
+    await client.query("rollback");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+// מבצע בפועל החזרה
+async function returnBag(bagId, result) {
+  await pool.query(
+    `update bags set status='returned', returned_at=now(), result=$2, updated_at=now() where id=$1`,
+    [bagId, result ? JSON.stringify(result) : null]
+  );
+}
+
+// עדכון סטטוס — מזהה לבד אם זו מסירה (איסוף) או החזרה, לפי מצב השקית הנוכחי. לסריקה בודדת
+// (מכשיר/מצלמה) — מתאים כי פיזית ברור אם סורקים בביקור איסוף או בביקור החזרה.
 router.post("/scan", asyncHandler(async (req, res) => {
   const { bag_code, result } = req.body || {};
   if (!bag_code) {
@@ -96,24 +125,9 @@ router.post("/scan", asyncHandler(async (req, res) => {
   const now = Date.now();
 
   if (bag.status === "waiting_pickup") {
-    const client = await pool.connect();
-    try {
-      await client.query("begin");
-      const collectionId = await getOrCreateCollection(client);
-      await client.query(
-        `update bags set status='with_supplier', picked_up_at=now(), collection_id=$2, updated_at=now()
-         where id=$1`,
-        [bag.id, collectionId]
-      );
-      await client.query("commit");
-      const fresh = await loadBag(bag_code);
-      res.json({ action: "picked_up", bag: serializeBag(fresh) });
-    } catch (e) {
-      await client.query("rollback");
-      throw e;
-    } finally {
-      client.release();
-    }
+    await pickupBag(bag.id);
+    const fresh = await loadBag(bag_code);
+    res.json({ action: "picked_up", bag: serializeBag(fresh) });
     return;
   }
 
@@ -123,12 +137,9 @@ router.post("/scan", asyncHandler(async (req, res) => {
       res.json({ action: "duplicate", bag: serializeBag(bag) });
       return;
     }
-    const { rows } = await pool.query(
-      `update bags set status='returned', returned_at=now(), result=$2, updated_at=now()
-       where id=$1 returning *`,
-      [bag.id, result ? JSON.stringify(result) : null]
-    );
-    res.json({ action: "returned", bag: serializeBag({ ...bag, ...rows[0] }) });
+    await returnBag(bag.id, result);
+    const fresh = await loadBag(bag_code);
+    res.json({ action: "returned", bag: serializeBag(fresh) });
     return;
   }
 
@@ -138,6 +149,49 @@ router.post("/scan", asyncHandler(async (req, res) => {
     return;
   }
   res.status(409).json({ error: "השקית כבר הוחזרה" });
+}));
+
+// סימון מרובה מרשימה (במקום סריקה) — מיכאל יכול לעבור על "ממתין לאיסוף"/"מה אצלי" ולסמן
+// V על כמה שקיות בבת אחת, במקום לסרוק כל אחת. action נקבע לפי הרשימה שבה מסמנים (לא ניחוש).
+router.post("/bulk-scan", asyncHandler(async (req, res) => {
+  const { bag_codes, action } = req.body || {};
+  if (!Array.isArray(bag_codes) || bag_codes.length === 0) {
+    res.status(400).json({ error: "bag_codes נדרש" });
+    return;
+  }
+  if (!["pickup", "return"].includes(action)) {
+    res.status(400).json({ error: "action חייב להיות pickup או return" });
+    return;
+  }
+
+  const results = [];
+  for (const code of bag_codes) {
+    try {
+      const bag = await loadBag(code);
+      if (!bag) {
+        results.push({ bag_code: code, ok: false, error: "קוד לא מוכר" });
+        continue;
+      }
+      if (action === "pickup") {
+        if (bag.status !== "waiting_pickup") {
+          results.push({ bag_code: code, ok: false, error: "השקית לא ממתינה לאיסוף" });
+          continue;
+        }
+        await pickupBag(bag.id);
+      } else {
+        if (bag.status !== "with_supplier") {
+          results.push({ bag_code: code, ok: false, error: "השקית לא אצל הספק" });
+          continue;
+        }
+        await returnBag(bag.id, null);
+      }
+      const fresh = await loadBag(code);
+      results.push({ bag_code: code, ok: true, bag: serializeBag(fresh) });
+    } catch (e) {
+      results.push({ bag_code: code, ok: false, error: e.message });
+    }
+  }
+  res.json({ results });
 }));
 
 // הספק מדווח לנו מה מספר הלקוח שהוא שייך ללקוח הזה אצלו — נשמר לפי טלפון, ויוצע אוטומטית

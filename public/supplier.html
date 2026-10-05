@@ -59,6 +59,12 @@
   .camera-hint{font-size:12px;color:var(--text-muted);text-align:center;}
   button.camera-toggle{width:100%;background:var(--accent);color:#fff;border:none;border-radius:10px;padding:12px;font-weight:600;font-size:14px;cursor:pointer;}
   button.camera-toggle.stop{background:var(--danger);}
+  input.search{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-family:inherit;font-size:14px;}
+  .check-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);cursor:pointer;}
+  .check-row input{width:auto;flex:none;}
+  .check-row .who{font-size:13.5px;font-weight:600;}
+  .check-row .sub{font-size:11.5px;color:var(--text-muted);margin-top:2px;}
+  button.btn-primary{background:var(--accent);color:#fff;border:none;border-radius:9px;padding:11px 16px;font-weight:600;font-size:14px;cursor:pointer;width:100%;}
 </style>
 </head>
 <body>
@@ -75,6 +81,7 @@
 
   <div class="tabs">
     <div class="tab active" data-tab="scan">סריקה</div>
+    <div class="tab" data-tab="pending">ממתין לאיסוף</div>
     <div class="tab" data-tab="mine">מה אצלי</div>
   </div>
 
@@ -104,15 +111,25 @@
 
   <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
+  <div id="pendingPanel" class="card hidden">
+    <div class="sub" style="margin:0;">אפשר גם לסמן V על כמה שקיות ולאשר בבת אחת, בלי לסרוק אחת-אחת — אם תעדיפו סריקה, זה עדיין בטאב "סריקה".</div>
+    <input class="search" id="pendingSearch" placeholder="חיפוש לפי שם / טלפון / כתובת…">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-size:13px;color:var(--text-muted);" id="pendingCount"></span>
+      <button class="reload" id="pendingReload">רענן</button>
+    </div>
+    <div id="pendingBody" style="display:flex;flex-direction:column;gap:8px;"></div>
+    <button type="button" class="btn-primary" id="pendingApply">סמן שקיות שנבחרו כנאספו</button>
+  </div>
+
   <div id="minePanel" class="card hidden">
+    <input class="search" id="mineSearch" placeholder="חיפוש לפי שם / טלפון / כתובת…">
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <span style="font-size:13px;color:var(--text-muted);" id="mineCount"></span>
       <button class="reload" id="reload">רענן</button>
     </div>
-    <table>
-      <thead><tr><th>הזמנה</th><th>לקוח</th><th>פריט</th><th>אצלי מאז</th></tr></thead>
-      <tbody id="mineBody"></tbody>
-    </table>
+    <div id="mineBody" style="display:flex;flex-direction:column;gap:8px;"></div>
+    <button type="button" class="btn-primary" id="mineApply">סמן שקיות שנבחרו כהוחזרו</button>
   </div>
 </div>
 
@@ -135,11 +152,13 @@ const ITEM_LABELS = {
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
   t.classList.add('active');
-  const isScan = t.dataset.tab === 'scan';
-  document.getElementById('scanPanel').classList.toggle('hidden', !isScan);
-  document.getElementById('minePanel').classList.toggle('hidden', isScan);
-  if (!isScan) { stopCamera(); loadMine(); }
-  else document.getElementById('scanInput').focus();
+  const tab = t.dataset.tab;
+  document.getElementById('scanPanel').classList.toggle('hidden', tab !== 'scan');
+  document.getElementById('pendingPanel').classList.toggle('hidden', tab !== 'pending');
+  document.getElementById('minePanel').classList.toggle('hidden', tab !== 'mine');
+  if (tab === 'scan') { document.getElementById('scanInput').focus(); return; }
+  stopCamera();
+  if (tab === 'pending') loadPending(); else loadMine();
 }));
 
 // --- beep ---
@@ -289,7 +308,56 @@ document.getElementById('cameraToggle').addEventListener('click', () => {
   if (cameraRunning) stopCamera(); else startCamera();
 });
 
-// --- mine ---
+// --- רשימות עם סימון V (חלופה לסריקה) + חיפוש חכם לפי שם/טלפון/כתובת ---
+function matchesSearch(b, q){
+  if (!q) return true;
+  const hay = (b.customer.first_name + ' ' + b.customer.last_name + ' ' + b.customer.phone + ' ' +
+    (b.customer.address || '') + ' ' + b.bag_code + ' ' + b.order_number).toLowerCase();
+  return hay.includes(q);
+}
+function renderCheckRows(bags, extraLine){
+  return bags.map(b => {
+    const who = b.customer.first_name + ' ' + b.customer.last_name;
+    const item = (ITEM_LABELS[b.item_type] || b.item_type) + (b.quantity > 1 ? ' ×' + b.quantity : '');
+    return '<label class="check-row"><input type="checkbox" class="checkItem" value="' + b.bag_code + '">' +
+      '<div><div class="who">' + b.bag_code + ' · ' + who + '</div>' +
+      '<div class="sub">' + b.customer.phone + ' · הזמנה #' + b.order_number + ' · ' + item + (extraLine ? extraLine(b) : '') + '</div></div></label>';
+  }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:16px;">אין שקיות מתאימות</div>';
+}
+
+let pendingBags = [];
+async function loadPending(){
+  const key = getKey();
+  const body = document.getElementById('pendingBody');
+  const countEl = document.getElementById('pendingCount');
+  if (!key) { countEl.textContent = 'הדבק מפתח קודם'; return; }
+  countEl.textContent = 'טוען…';
+  try {
+    const res = await fetch('/api/supplier/pending', { headers: { Authorization: 'Bearer ' + key } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    pendingBags = data.bags;
+    renderPending();
+  } catch (err) {
+    countEl.textContent = 'שגיאה: ' + err.message;
+  }
+}
+function renderPending(){
+  const q = document.getElementById('pendingSearch').value.trim().toLowerCase();
+  const filtered = pendingBags.filter(b => matchesSearch(b, q));
+  document.getElementById('pendingCount').textContent = filtered.length + ' שקיות ממתינות';
+  document.getElementById('pendingBody').innerHTML = renderCheckRows(filtered);
+}
+document.getElementById('pendingReload').onclick = loadPending;
+document.getElementById('pendingSearch').addEventListener('input', renderPending);
+document.getElementById('pendingApply').addEventListener('click', async () => {
+  const codes = [...document.querySelectorAll('#pendingBody .checkItem:checked')].map(c => c.value);
+  if (codes.length === 0) { alert('לא סומנו שקיות'); return; }
+  await bulkScan(codes, 'pickup');
+  loadPending();
+});
+
+let mineBags = [];
 async function loadMine(){
   const key = getKey();
   const body = document.getElementById('mineBody');
@@ -300,18 +368,46 @@ async function loadMine(){
     const res = await fetch('/api/supplier/with-me', { headers: { Authorization: 'Bearer ' + key } });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
-    countEl.textContent = data.bags.length + ' שקיות אצלי כרגע';
-    body.innerHTML = data.bags.map(b => {
-      const who = b.customer.first_name + ' ' + b.customer.last_name;
-      const item = (ITEM_LABELS[b.item_type] || b.item_type) + (b.quantity > 1 ? ' ×' + b.quantity : '');
-      const since = b.picked_up_at ? new Date(b.picked_up_at).toLocaleDateString('he-IL') : '—';
-      return '<tr><td>#' + b.order_number + '</td><td>' + who + '</td><td>' + item + '</td><td>' + since + '</td></tr>';
-    }).join('') || '<tr><td colspan="4" style="color:var(--text-muted)">אין כרגע שקיות</td></tr>';
+    mineBags = data.bags;
+    renderMine();
   } catch (err) {
     countEl.textContent = 'שגיאה: ' + err.message;
   }
 }
+function renderMine(){
+  const q = document.getElementById('mineSearch').value.trim().toLowerCase();
+  const filtered = mineBags.filter(b => matchesSearch(b, q));
+  document.getElementById('mineCount').textContent = filtered.length + ' שקיות אצלי כרגע';
+  document.getElementById('mineBody').innerHTML = renderCheckRows(filtered, (b) =>
+    b.picked_up_at ? ' · אצלי מאז ' + new Date(b.picked_up_at).toLocaleDateString('he-IL') : '');
+}
 document.getElementById('reload').onclick = loadMine;
+document.getElementById('mineSearch').addEventListener('input', renderMine);
+document.getElementById('mineApply').addEventListener('click', async () => {
+  const codes = [...document.querySelectorAll('#mineBody .checkItem:checked')].map(c => c.value);
+  if (codes.length === 0) { alert('לא סומנו שקיות'); return; }
+  await bulkScan(codes, 'return');
+  loadMine();
+});
+
+async function bulkScan(bag_codes, action){
+  const key = getKey();
+  try {
+    const res = await fetch('/api/supplier/bulk-scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+      body: JSON.stringify({ bag_codes, action }),
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'שגיאה'); return; }
+    const failed = (data.results || []).filter(r => !r.ok);
+    if (failed.length > 0) {
+      alert('לא עודכנו ' + failed.length + ' שקיות:\n' + failed.map(f => f.bag_code + ' — ' + f.error).join('\n'));
+    }
+  } catch (err) {
+    alert('שגיאת רשת: ' + err.message);
+  }
+}
 </script>
 </body>
 </html>
