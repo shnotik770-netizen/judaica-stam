@@ -2,6 +2,8 @@ import express from "express";
 import { pool } from "../lib/db.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import { enqueuePrint } from "../lib/printQueue.js";
+import { toHebrewDate } from "../lib/hebrewDate.js";
+import { sendSms } from "../lib/call2all.js";
 
 export const router = express.Router();
 // ללא אימות בכוונה — החלטת החנות: מי שיש לו גישה לאתר יכול ליצור הזמנות, בלי קוד API.
@@ -90,11 +92,15 @@ router.post("/", asyncHandler(async (req, res) => {
 
     await client.query("commit");
 
-    // הדפסת מדבקה לכל שקית ברגע יצירת ההזמנה — Code128, אותו קוד מספרי שהוחזר בכל שקית
+    // הדפסת מדבקה לכל שקית ברגע יצירת ההזמנה — Code128, אותו קוד מספרי שהוחזר בכל שקית.
+    // תוכן המדבקה: מספר שקית, שם, טלפון, תאריך הזמנה (עברי, ללא ניקוד), סוג הפריט.
+    const hebrewOrderDate = toHebrewDate(new Date());
     for (const b of createdBags) {
       const text = [
-        `הזמנה מספר ${order_number}`,
+        `הזמנה ${order_number} | שקית ${b.bag_code}`,
         `${customer.first_name} ${customer.last_name}`,
+        customer.phone,
+        hebrewOrderDate,
         `${ITEM_TYPE_LABELS[b.item_type] || b.item_type}${b.quantity > 1 ? ` ×${b.quantity}` : ""}`,
       ].join("\n");
       enqueuePrint({ text, barcode: b.bag_code, copies: 1 }).catch((e) =>
@@ -109,6 +115,103 @@ router.post("/", asyncHandler(async (req, res) => {
   } finally {
     client.release();
   }
+}));
+
+// בדיקת לקוח קיים לפי טלפון — לפני יצירת הזמנה, כדי להציע את מספר הלקוח אצל הספק אם כבר ידוע
+router.get("/customer-lookup", asyncHandler(async (req, res) => {
+  const phone = (req.query.phone || "").trim();
+  if (!phone) {
+    res.status(400).json({ error: "phone נדרש" });
+    return;
+  }
+  const { rows } = await pool.query(
+    "select first_name, last_name, address, supplier_customer_number from customers where phone = $1",
+    [phone]
+  );
+  if (rows.length === 0) {
+    res.json({ found: false });
+    return;
+  }
+  res.json({ found: true, ...rows[0] });
+}));
+
+// רשימת שקיות עם מסננים — למסך "כל ההזמנות" (סוג פריט, מספר איסוף, סטטוס)
+router.get("/bags", asyncHandler(async (req, res) => {
+  const { item_type, collection_number, status } = req.query;
+  const conditions = [];
+  const params = [];
+  if (item_type) { params.push(item_type); conditions.push(`b.item_type = $${params.length}`); }
+  if (status) { params.push(status); conditions.push(`b.status = $${params.length}`); }
+  if (collection_number) { params.push(+collection_number); conditions.push(`col.collection_number = $${params.length}`); }
+  const where = conditions.length ? "where " + conditions.join(" and ") : "";
+
+  const { rows } = await pool.query(
+    `select o.order_number, c.first_name, c.last_name, c.phone,
+            b.bag_code, b.item_type, b.item_type_note, b.quantity, b.status,
+            b.picked_up_at, b.returned_at, b.customer_notified_at, b.customer_collected_at, b.created_at,
+            col.collection_number, col.started_at as collection_started_at
+     from bags b
+     join orders o on o.id = b.order_id
+     join customers c on c.id = o.customer_id
+     left join collections col on col.id = b.collection_id
+     ${where}
+     order by b.created_at desc`,
+    params
+  );
+  res.json({ bags: rows });
+}));
+
+const SCAN_DUPLICATE_WINDOW_MS = 60 * 1000;
+
+// סריקה מהירה בחנות מול הלקוח הסופי — לאחר שהשקית חזרה מהספק: סריקה ראשונה מסמנת
+// "לקוח קיבל עדכון" (ושולחת SMS), סריקה שנייה מסמנת "נאסף ע"י לקוח". מזהה לבד איזה שלב לפי מה שכבר נרשם.
+router.post("/scan", asyncHandler(async (req, res) => {
+  const { bag_code } = req.body || {};
+  if (!bag_code) {
+    res.status(400).json({ error: "bag_code נדרש" });
+    return;
+  }
+  const { rows } = await pool.query(
+    `select b.id, b.bag_code, b.status, b.customer_notified_at, b.customer_collected_at,
+            o.order_number, c.first_name, c.last_name, c.phone
+     from bags b
+     join orders o on o.id = b.order_id
+     join customers c on c.id = o.customer_id
+     where b.bag_code = $1`,
+    [bag_code]
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ error: "קוד לא מוכר" });
+    return;
+  }
+  const bag = rows[0];
+  const customer = { first_name: bag.first_name, last_name: bag.last_name, phone: bag.phone };
+
+  if (bag.status !== "returned") {
+    res.status(409).json({ error: "השקית עדיין לא חזרה מהספק" });
+    return;
+  }
+
+  if (!bag.customer_notified_at) {
+    await pool.query("update bags set customer_notified_at = now(), updated_at = now() where id = $1", [bag.id]);
+    sendSms(bag.phone, `שלום ${bag.first_name}, ההזמנה שלך מספר ${bag.order_number} מוכנה לאיסוף בחנות.`).catch((e) =>
+      console.error("sendSms failed", bag.bag_code, e.message)
+    );
+    res.json({ action: "notified", bag_code: bag.bag_code, order_number: bag.order_number, customer });
+    return;
+  }
+
+  if (!bag.customer_collected_at) {
+    await pool.query("update bags set customer_collected_at = now(), updated_at = now() where id = $1", [bag.id]);
+    res.json({ action: "collected", bag_code: bag.bag_code, order_number: bag.order_number, customer });
+    return;
+  }
+
+  if (Date.now() - new Date(bag.customer_collected_at).getTime() < SCAN_DUPLICATE_WINDOW_MS) {
+    res.json({ action: "duplicate", bag_code: bag.bag_code, order_number: bag.order_number, customer });
+    return;
+  }
+  res.status(409).json({ error: "השקית כבר נאספה ע\"י הלקוח" });
 }));
 
 // רשימת כל ההזמנות + סיכום סטטוס שקיות לכל אחת — למסך "כל ההזמנות"

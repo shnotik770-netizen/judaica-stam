@@ -7,17 +7,20 @@ export const router = express.Router();
 router.use(requireApiKey("supplier"));
 
 const DUPLICATE_WINDOW_MS = 60 * 1000;
+const COLLECTION_WINDOW_MS = 30 * 60 * 1000; // חלון קיבוץ לאיסוף: סריקה בפער של עד 30 דקות מצטרפת לאותו איסוף
+
+const BAG_SELECT = `
+  select b.*, o.order_number, o.notes as order_notes,
+         c.first_name, c.last_name, c.phone, c.address,
+         col.collection_number, col.started_at as collection_started_at
+  from bags b
+  join orders o on o.id = b.order_id
+  join customers c on c.id = o.customer_id
+  left join collections col on col.id = b.collection_id
+`;
 
 async function loadBag(code) {
-  const { rows } = await pool.query(
-    `select b.*, o.order_number, o.notes as order_notes,
-            c.first_name, c.last_name, c.phone, c.address
-     from bags b
-     join orders o on o.id = b.order_id
-     join customers c on c.id = o.customer_id
-     where b.bag_code = $1`,
-    [code]
-  );
+  const { rows } = await pool.query(BAG_SELECT + " where b.bag_code = $1", [code]);
   return rows[0] || null;
 }
 
@@ -31,6 +34,8 @@ function serializeBag(bag) {
     quantity: bag.quantity,
     picked_up_at: bag.picked_up_at,
     returned_at: bag.returned_at,
+    collection_number: bag.collection_number || null,
+    collection_started_at: bag.collection_started_at || null,
     customer: {
       first_name: bag.first_name,
       last_name: bag.last_name,
@@ -40,30 +45,28 @@ function serializeBag(bag) {
   };
 }
 
-// כל השקיות שממתינות לאיסוף — הרשימה המלאה שהתוכנה של הספק מושכת מראש (לא per-code).
-// האתר רק מכין את הרשימה; הספק הוא זה שמאשר ומייבא אצלו, לא האתר שדוחף.
-router.get("/pending", asyncHandler(async (req, res) => {
-  const { rows } = await pool.query(
-    `select b.*, o.order_number, c.first_name, c.last_name, c.phone, c.address
-     from bags b
-     join orders o on o.id = b.order_id
-     join customers c on c.id = o.customer_id
-     where b.status = 'waiting_pickup'
-     order by o.created_at asc`
+// מוצא איסוף פתוח (נסרק בו משהו ב-30 הדקות האחרונות) או פותח חדש, ומעדכן last_scan_at.
+async function getOrCreateCollection(client) {
+  const open = await client.query(
+    `select id from collections where last_scan_at > now() - interval '30 minutes' order by last_scan_at desc limit 1`
   );
+  if (open.rows.length > 0) {
+    await client.query("update collections set last_scan_at = now() where id = $1", [open.rows[0].id]);
+    return open.rows[0].id;
+  }
+  const created = await client.query("insert into collections default values returning id");
+  return created.rows[0].id;
+}
+
+// כל השקיות שממתינות לאיסוף — תצוגה מקדימה בלבד, לא השלב המרכזי (ראו README).
+router.get("/pending", asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(BAG_SELECT + " where b.status = 'waiting_pickup' order by o.created_at asc");
   res.json({ bags: rows.map(serializeBag) });
 }));
 
 // כל השקיות שכרגע אצל הספק (נאספו ועוד לא הוחזרו) — למסך "מה אצלי"
 router.get("/with-me", asyncHandler(async (req, res) => {
-  const { rows } = await pool.query(
-    `select b.*, o.order_number, c.first_name, c.last_name, c.phone, c.address
-     from bags b
-     join orders o on o.id = b.order_id
-     join customers c on c.id = o.customer_id
-     where b.status = 'with_supplier'
-     order by b.picked_up_at asc`
-  );
+  const { rows } = await pool.query(BAG_SELECT + " where b.status = 'with_supplier' order by b.picked_up_at asc");
   res.json({ bags: rows.map(serializeBag) });
 }));
 
@@ -93,12 +96,24 @@ router.post("/scan", asyncHandler(async (req, res) => {
   const now = Date.now();
 
   if (bag.status === "waiting_pickup") {
-    const { rows } = await pool.query(
-      `update bags set status='with_supplier', picked_up_at=now(), updated_at=now()
-       where id=$1 returning *`,
-      [bag.id]
-    );
-    res.json({ action: "picked_up", bag: serializeBag({ ...bag, ...rows[0] }) });
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      const collectionId = await getOrCreateCollection(client);
+      await client.query(
+        `update bags set status='with_supplier', picked_up_at=now(), collection_id=$2, updated_at=now()
+         where id=$1`,
+        [bag.id, collectionId]
+      );
+      await client.query("commit");
+      const fresh = await loadBag(bag_code);
+      res.json({ action: "picked_up", bag: serializeBag(fresh) });
+    } catch (e) {
+      await client.query("rollback");
+      throw e;
+    } finally {
+      client.release();
+    }
     return;
   }
 
@@ -123,4 +138,23 @@ router.post("/scan", asyncHandler(async (req, res) => {
     return;
   }
   res.status(409).json({ error: "השקית כבר הוחזרה" });
+}));
+
+// הספק מדווח לנו מה מספר הלקוח שהוא שייך ללקוח הזה אצלו — נשמר לפי טלפון, ויוצע אוטומטית
+// בפעם הבאה שאותו טלפון מוזן אצלנו בהזמנה חדשה.
+router.post("/customer-link", asyncHandler(async (req, res) => {
+  const { phone, customer_number } = req.body || {};
+  if (!phone || !customer_number) {
+    res.status(400).json({ error: "phone ו-customer_number נדרשים" });
+    return;
+  }
+  const { rows } = await pool.query(
+    "update customers set supplier_customer_number = $2 where phone = $1 returning id",
+    [phone, customer_number]
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ error: "לא נמצא לקוח עם הטלפון הזה אצלנו" });
+    return;
+  }
+  res.json({ ok: true });
 }));

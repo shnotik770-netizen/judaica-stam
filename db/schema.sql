@@ -13,6 +13,9 @@ create table if not exists customers (
 );
 -- טבלה ישנה (מהדיפלוי הראשון) כללה customer_number חובה+ייחודי — מוסר לגמרי, idempotent
 alter table customers drop column if exists customer_number;
+-- מספר הלקוח שיודאיקה פלוס משייכים ללקוח הזה אצלם (מדווח חזרה דרך POST /api/supplier/customer-link).
+-- כשאותו טלפון חוזר בעתיד, נציע את המספר הזה אוטומטית בטופס ההזמנה.
+alter table customers add column if not exists supplier_customer_number text;
 
 -- מספר הזמנה רץ, מונפק אוטומטית בשרת — אף אחד לא מזין אותו ידנית
 create sequence if not exists order_number_seq start 1001;
@@ -28,6 +31,17 @@ create table if not exists orders (
   updated_at timestamptz not null default now()
 );
 
+-- איסוף (pickup run) — קיבוץ אוטומטי של שקיות שנסרקו באותו ביקור של הספק, לצורך מעקב.
+-- שקית שנסרקת ומצטרפת ל"איסוף" פתוח (נסרק בו משהו ב-30 הדקות האחרונות) מצטרפת אליו;
+-- אחרת נפתח איסוף חדש עם מספר רץ. ראו הלוגיקה ב-routes/supplier.js.
+create sequence if not exists collection_number_seq start 1;
+create table if not exists collections (
+  id uuid primary key default gen_random_uuid(),
+  collection_number int not null unique default nextval('collection_number_seq'),
+  started_at timestamptz not null default now(),
+  last_scan_at timestamptz not null default now()
+);
+
 -- שקיות — יחידת המעקב מול הספק. כל שקית = ברקוד נפרד, יכולה לנוע בנפרד מהזמנה שלה.
 create table if not exists bags (
   id uuid primary key default gen_random_uuid(),
@@ -39,13 +53,22 @@ create table if not exists bags (
   quantity int not null default 1,
   status text not null default 'waiting_pickup' check (status in ('waiting_pickup','with_supplier','returned')),
   result jsonb,
+  collection_id uuid references collections(id),
   picked_up_at timestamptz,
   returned_at timestamptz,
+  -- השלב האחרון אחרי שחזר מהספק: עדכנו את הלקוח (SMS) שהוא מוכן, ואז הלקוח בא ואסף אותו מהחנות.
+  customer_notified_at timestamptz,
+  customer_collected_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 create index if not exists idx_bags_order on bags(order_id);
 create index if not exists idx_bags_status on bags(status);
+create index if not exists idx_bags_collection on bags(collection_id);
+-- טבלה ישנה לא כללה את העמודות האלה — מוסיפים בדיעבד, idempotent
+alter table bags add column if not exists collection_id uuid references collections(id);
+alter table bags add column if not exists customer_notified_at timestamptz;
+alter table bags add column if not exists customer_collected_at timestamptz;
 
 -- מפתחות API. נשמר רק hash, לא הערך עצמו.
 -- scope: 'internal' (צוות החנות — /api/orders) | 'supplier' (ספק חיצוני — /api/supplier/*)
