@@ -56,12 +56,14 @@
   .camera-hint{font-size:12px;color:var(--text-muted);text-align:center;}
   button.camera-toggle{width:100%;background:var(--accent);color:#fff;border:none;border-radius:10px;padding:12px;font-weight:600;font-size:14px;cursor:pointer;}
   button.camera-toggle.stop{background:var(--danger);}
-  input.search{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-family:inherit;font-size:14px;}
-  .check-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);cursor:pointer;}
-  .check-row input{width:auto;flex:none;}
+  input.search,select.search{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-family:inherit;font-size:14px;}
+  .check-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);}
   .check-row .who{font-size:13.5px;font-weight:600;}
   .check-row .sub{font-size:11.5px;color:var(--text-muted);margin-top:2px;}
   button.btn-primary{background:var(--accent);color:#fff;border:none;border-radius:9px;padding:11px 16px;font-weight:600;font-size:14px;cursor:pointer;width:100%;}
+  .purpose-bar{display:flex;justify-content:space-between;align-items:center;background:var(--accent-soft);color:var(--accent);border-radius:9px;padding:8px 12px;font-size:13px;font-weight:600;flex-wrap:wrap;gap:8px;}
+  .purpose-bar button{padding:5px 10px;font-size:12px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:7px;cursor:pointer;font-weight:600;}
+  .filters2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
 </style>
 </head>
 <body>
@@ -101,24 +103,59 @@
   <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
   <div id="pendingPanel" class="card hidden">
-    <div class="sub" style="margin:0;">אפשר גם לסמן V על כמה שקיות ולאשר בבת אחת, בלי לסרוק אחת-אחת — אם תעדיפו סריקה, זה עדיין בטאב "סריקה".</div>
     <input class="search" id="pendingSearch" placeholder="חיפוש לפי שם / טלפון / כתובת…">
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <span style="font-size:13px;color:var(--text-muted);" id="pendingCount"></span>
       <button class="reload" id="pendingReload">רענן</button>
     </div>
+    <button type="button" class="btn-primary" id="pendingQuickToggle">⚡ איסוף מהיר</button>
+    <div id="pendingQuickMount"></div>
     <div id="pendingBody" style="display:flex;flex-direction:column;gap:8px;"></div>
-    <button type="button" class="btn-primary" id="pendingApply">סמן שקיות שנבחרו כנאספו</button>
   </div>
 
   <div id="minePanel" class="card hidden">
     <input class="search" id="mineSearch" placeholder="חיפוש לפי שם / טלפון / כתובת…">
+    <div class="filters2">
+      <select class="search" id="mineStage">
+        <option value="">כל המצבים</option>
+        <option value="collected">אספתי</option>
+        <option value="imported">נכנס לתוכנה</option>
+        <option value="returning">במסירה לחנות</option>
+      </select>
+      <input class="search" id="mineCollection" type="number" placeholder="מספר איסוף">
+    </div>
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <span style="font-size:13px;color:var(--text-muted);" id="mineCount"></span>
-      <button class="reload" id="reload">רענן</button>
+      <button class="reload" id="mineReload">רענן</button>
     </div>
+    <button type="button" class="btn-primary" id="mineQuickToggle">⚡ מסירה לחנות</button>
+    <div id="mineQuickMount"></div>
     <div id="mineBody" style="display:flex;flex-direction:column;gap:8px;"></div>
-    <button type="button" class="btn-primary" id="mineApply">סמן שקיות שנבחרו כהוחזרו</button>
+  </div>
+
+  <div id="quickActionPanel" class="card hidden" style="display:flex;flex-direction:column;gap:12px;">
+    <div class="purpose-bar">
+      <span id="quickActionLabel"></span>
+      <div style="display:flex;gap:6px;">
+        <button type="button" id="quickScanToggle">📷 סריקה מהירה</button>
+        <button type="button" id="quickActionCancel">בטל</button>
+      </div>
+    </div>
+    <div id="quickScanSub" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
+      <div class="mode-tabs">
+        <div class="mode-tab active" data-mode="device">⌨️ סורק מחובר</div>
+        <div class="mode-tab" data-mode="camera">📷 מצלמה</div>
+      </div>
+      <div id="quickDeviceMode">
+        <input id="quickScanInput" class="scan-input" placeholder="סרוק ברקוד…">
+      </div>
+      <div id="quickCameraMode" class="hidden" style="display:flex;flex-direction:column;gap:10px;">
+        <div id="quickCameraWrap" class="hidden"><div id="quickCameraReader"></div></div>
+        <button type="button" class="camera-toggle" id="quickCameraToggle">הפעל מצלמה</button>
+        <div class="camera-hint">סריקה רציפה — תעבירו שקית אחרי שקית מול המצלמה</div>
+      </div>
+    </div>
+    <div class="log" id="actionLog"></div>
   </div>
 </div>
 
@@ -136,6 +173,7 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   document.getElementById('scanPanel').classList.toggle('hidden', tab !== 'scan');
   document.getElementById('pendingPanel').classList.toggle('hidden', tab !== 'pending');
   document.getElementById('minePanel').classList.toggle('hidden', tab !== 'mine');
+  stopQuickCamera();
   if (tab === 'scan') { document.getElementById('scanInput').focus(); return; }
   stopCamera();
   if (tab === 'pending') loadPending(); else loadMine();
@@ -286,21 +324,30 @@ document.getElementById('cameraToggle').addEventListener('click', () => {
   if (cameraRunning) stopCamera(); else startCamera();
 });
 
-// --- רשימות עם סימון V (חלופה לסריקה) + חיפוש חכם לפי שם/טלפון/כתובת ---
+// --- רשימות (ממתין לאיסוף / מה אצלי) + חיפוש חכם לפי שם/טלפון/כתובת ---
+function esc(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 function matchesSearch(b, q){
   if (!q) return true;
   const hay = (b.customer.first_name + ' ' + b.customer.last_name + ' ' + b.customer.phone + ' ' +
     (b.customer.address || '') + ' ' + b.bag_code + ' ' + b.order_number).toLowerCase();
   return hay.includes(q);
 }
-function renderCheckRows(bags, extraLine){
+const STAGE_LABELS = { collected: 'אספתי', imported: 'נכנס לתוכנה', returning: 'במסירה לחנות' };
+function renderRows(bags, extraLine, clickable){
   return bags.map(b => {
-    const who = b.customer.first_name + ' ' + b.customer.last_name;
+    const who = esc(b.customer.first_name) + ' ' + esc(b.customer.last_name);
     const item = (ITEM_LABELS[b.item_type] || b.item_type) + (b.quantity > 1 ? ' ×' + b.quantity : '');
-    return '<label class="check-row"><input type="checkbox" class="checkItem" value="' + b.bag_code + '">' +
+    return '<div class="check-row"' + (clickable ? ' data-code="' + b.bag_code + '" style="cursor:pointer;"' : '') + '>' +
       '<div><div class="who">' + b.bag_code + ' · ' + who + '</div>' +
-      '<div class="sub">' + b.customer.phone + ' · הזמנה #' + b.order_number + ' · ' + item + (extraLine ? extraLine(b) : '') + '</div></div></label>';
+      '<div class="sub">' + esc(b.customer.phone) + ' · הזמנה #' + b.order_number + ' · ' + item + (extraLine ? extraLine(b) : '') + '</div></div></div>';
   }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:16px;">אין שקיות מתאימות</div>';
+}
+function wireRowClicks(containerId){
+  document.querySelectorAll('#' + containerId + ' .check-row[data-code]').forEach(row => {
+    row.addEventListener('click', () => applyQuickAction([row.dataset.code]));
+  });
 }
 
 let pendingBags = [];
@@ -321,16 +368,12 @@ function renderPending(){
   const q = document.getElementById('pendingSearch').value.trim().toLowerCase();
   const filtered = pendingBags.filter(b => matchesSearch(b, q));
   document.getElementById('pendingCount').textContent = filtered.length + ' שקיות ממתינות';
-  document.getElementById('pendingBody').innerHTML = renderCheckRows(filtered);
+  const active = quickAction && quickAction.mount === 'pending';
+  document.getElementById('pendingBody').innerHTML = renderRows(filtered, null, active);
+  if (active) wireRowClicks('pendingBody');
 }
 document.getElementById('pendingReload').onclick = loadPending;
 document.getElementById('pendingSearch').addEventListener('input', renderPending);
-document.getElementById('pendingApply').addEventListener('click', async () => {
-  const codes = [...document.querySelectorAll('#pendingBody .checkItem:checked')].map(c => c.value);
-  if (codes.length === 0) { alert('לא סומנו שקיות'); return; }
-  await bulkScan(codes, 'pickup');
-  loadPending();
-});
 
 let mineBags = [];
 async function loadMine(){
@@ -348,37 +391,164 @@ async function loadMine(){
 }
 function renderMine(){
   const q = document.getElementById('mineSearch').value.trim().toLowerCase();
-  const filtered = mineBags.filter(b => matchesSearch(b, q));
+  const stage = document.getElementById('mineStage').value;
+  const collection = document.getElementById('mineCollection').value;
+  const filtered = mineBags.filter(b => matchesSearch(b, q))
+    .filter(b => !stage || b.stage === stage)
+    .filter(b => !collection || String(b.collection_number) === String(collection));
   document.getElementById('mineCount').textContent = filtered.length + ' שקיות אצלי כרגע';
-  document.getElementById('mineBody').innerHTML = renderCheckRows(filtered, (b) =>
-    b.picked_up_at ? ' · אצלי מאז ' + new Date(b.picked_up_at).toLocaleDateString('he-IL') : '');
+  const active = quickAction && quickAction.mount === 'mine';
+  document.getElementById('mineBody').innerHTML = renderRows(filtered, (b) =>
+    ' · ' + (STAGE_LABELS[b.stage] || b.stage) +
+    (b.picked_up_at ? ' · אצלי מאז ' + new Date(b.picked_up_at).toLocaleDateString('he-IL') : ''), active);
+  if (active) wireRowClicks('mineBody');
 }
-document.getElementById('reload').onclick = loadMine;
+document.getElementById('mineReload').onclick = loadMine;
 document.getElementById('mineSearch').addEventListener('input', renderMine);
-document.getElementById('mineApply').addEventListener('click', async () => {
-  const codes = [...document.querySelectorAll('#mineBody .checkItem:checked')].map(c => c.value);
-  if (codes.length === 0) { alert('לא סומנו שקיות'); return; }
-  await bulkScan(codes, 'return');
-  loadMine();
+document.getElementById('mineStage').addEventListener('change', renderMine);
+document.getElementById('mineCollection').addEventListener('input', () => {
+  clearTimeout(window._mineCollectionDebounce);
+  window._mineCollectionDebounce = setTimeout(renderMine, 300);
 });
 
-async function bulkScan(bag_codes, action){
+// --- "פעולה מהירה" משותפת לשני המסכים: לחיצה על שורה מבצעת מיד, + אפשרות סריקה מהירה ---
+let quickAction = null; // {type:'pickup'|'return', mount:'pending'|'mine'}
+let quickCameraInstance = null;
+let quickCameraRunning = false;
+const quickRecentlySeen = new Map();
+
+function openQuickAction(mount, type, label){
+  quickAction = { type, mount };
+  const panel = document.getElementById('quickActionPanel');
+  document.getElementById(mount === 'pending' ? 'pendingQuickMount' : 'mineQuickMount').appendChild(panel);
+  document.getElementById('quickActionLabel').textContent = label;
+  panel.classList.remove('hidden');
+  document.getElementById('quickScanSub').classList.add('hidden');
+  document.getElementById('actionLog').innerHTML = '';
+  if (mount === 'pending') renderPending(); else renderMine();
+}
+function closeQuickAction(){
+  stopQuickCamera();
+  const mount = quickAction && quickAction.mount;
+  quickAction = null;
+  document.getElementById('quickActionPanel').classList.add('hidden');
+  if (mount === 'pending') renderPending(); else if (mount === 'mine') renderMine();
+}
+document.getElementById('pendingQuickToggle').addEventListener('click', () => {
+  if (quickAction && quickAction.mount === 'pending') { closeQuickAction(); return; }
+  openQuickAction('pending', 'pickup', '📦 מצב פעיל: איסוף מהיר — לחיצה על שורה תסמן אותה כנאספה');
+});
+document.getElementById('mineQuickToggle').addEventListener('click', () => {
+  if (quickAction && quickAction.mount === 'mine') { closeQuickAction(); return; }
+  openQuickAction('mine', 'return', '🏬 מצב פעיל: מסירה לחנות — לחיצה על שורה תסמן אותה כהוחזרה');
+});
+document.getElementById('quickActionCancel').addEventListener('click', closeQuickAction);
+document.getElementById('quickScanToggle').addEventListener('click', () => {
+  const sub = document.getElementById('quickScanSub');
+  sub.classList.toggle('hidden');
+  if (!sub.classList.contains('hidden')) document.getElementById('quickScanInput').focus();
+  else stopQuickCamera();
+});
+
+function addQuickLog(kind, title, detail){
+  const el = document.createElement('div');
+  el.className = 'entry ' + kind;
+  el.innerHTML = '<b></b><div class="d"></div>';
+  el.querySelector('b').textContent = title;
+  el.querySelector('.d').textContent = detail;
+  document.getElementById('actionLog').appendChild(el);
+}
+
+async function applyQuickAction(bag_codes){
+  if (!quickAction) return;
   try {
     const res = await fetch('/api/supplier/bulk-scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bag_codes, action }),
+      body: JSON.stringify({ bag_codes, action: quickAction.type }),
     });
     const data = await res.json();
-    if (!res.ok) { alert(data.error || 'שגיאה'); return; }
-    const failed = (data.results || []).filter(r => !r.ok);
-    if (failed.length > 0) {
-      alert('לא עודכנו ' + failed.length + ' שקיות:\n' + failed.map(f => f.bag_code + ' — ' + f.error).join('\n'));
+    if (!res.ok) {
+      bag_codes.forEach(c => addQuickLog('warn', c, data.error || 'שגיאה'));
+      beep(220, 0.3);
+    } else {
+      (data.results || []).forEach(r => {
+        if (!r.ok) { addQuickLog('warn', r.bag_code, r.error || 'שגיאה'); return; }
+        const who = r.bag.customer.first_name + ' ' + r.bag.customer.last_name;
+        addQuickLog('ok', who, r.bag.bag_code + ' · הזמנה #' + r.bag.order_number);
+      });
+      beep(880, 0.15);
     }
   } catch (err) {
-    alert('שגיאת רשת: ' + err.message);
+    bag_codes.forEach(c => addQuickLog('err', c, 'שגיאת רשת: ' + err.message));
+  }
+  if (quickAction.mount === 'pending') loadPending(); else loadMine();
+}
+
+async function quickProcessScan(code){
+  code = (code || '').trim();
+  if (!code) return;
+  await applyQuickAction([code]);
+}
+document.getElementById('quickScanInput').addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter') return;
+  const code = e.target.value.trim();
+  e.target.value = '';
+  await quickProcessScan(code);
+  e.target.focus();
+});
+document.querySelectorAll('#quickScanSub .mode-tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('#quickScanSub .mode-tab').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  const isDevice = t.dataset.mode === 'device';
+  document.getElementById('quickDeviceMode').classList.toggle('hidden', !isDevice);
+  document.getElementById('quickCameraMode').classList.toggle('hidden', isDevice);
+  if (isDevice) { stopQuickCamera(); document.getElementById('quickScanInput').focus(); }
+}));
+
+async function onQuickCameraDecode(decodedText){
+  const now = Date.now();
+  const last = quickRecentlySeen.get(decodedText);
+  if (last && now - last < 3000) return;
+  quickRecentlySeen.set(decodedText, now);
+  await quickProcessScan(decodedText);
+}
+async function startQuickCamera(){
+  const wrap = document.getElementById('quickCameraWrap');
+  const btn = document.getElementById('quickCameraToggle');
+  wrap.classList.remove('hidden');
+  btn.textContent = 'עוצר…';
+  quickCameraInstance = new Html5Qrcode('quickCameraReader', {
+    formatsToSupport: [Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.QR_CODE],
+    verbose: false,
+  });
+  try {
+    await quickCameraInstance.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 260, height: 120 } },
+      onQuickCameraDecode,
+      () => {}
+    );
+    quickCameraRunning = true;
+    btn.textContent = 'עצור מצלמה';
+    btn.classList.add('stop');
+  } catch (err) {
+    addQuickLog('err', 'מצלמה', 'לא הצלחתי לפתוח מצלמה: ' + (err?.message || err?.name || String(err)));
+    wrap.classList.add('hidden');
+    btn.textContent = 'הפעל מצלמה';
   }
 }
+async function stopQuickCamera(){
+  if (!quickCameraRunning || !quickCameraInstance) return;
+  try { await quickCameraInstance.stop(); quickCameraInstance.clear(); } catch (e) {}
+  quickCameraRunning = false;
+  document.getElementById('quickCameraWrap').classList.add('hidden');
+  document.getElementById('quickCameraToggle').textContent = 'הפעל מצלמה';
+  document.getElementById('quickCameraToggle').classList.remove('stop');
+}
+document.getElementById('quickCameraToggle').addEventListener('click', () => {
+  if (quickCameraRunning) stopQuickCamera(); else startQuickCamera();
+});
 </script>
 </body>
 </html>

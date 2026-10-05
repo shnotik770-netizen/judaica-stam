@@ -67,9 +67,23 @@ create table if not exists bags (
 alter table bags add column if not exists collection_id uuid references collections(id);
 alter table bags add column if not exists customer_notified_at timestamptz;
 alter table bags add column if not exists customer_collected_at timestamptz;
+-- מתי התוכנה של הספק משכה (GET /api/supplier/with-me) את השקית בפעם הראשונה אחרי שנאספה —
+-- "נכנסה לתוכנה שלו". משמש כתת-מצב בתצוגת "מה אצלי" (ראו routes/supplier.js).
+alter table bags add column if not exists imported_at timestamptz;
 create index if not exists idx_bags_order on bags(order_id);
 create index if not exists idx_bags_status on bags(status);
 create index if not exists idx_bags_collection on bags(collection_id);
+
+-- יומן פעולות — רשומה לכל פעולה משמעותית (יצירה/סריקה/עריכה/מחיקה/תיקון ידני), למסך "ניהול".
+create table if not exists activity_log (
+  id uuid primary key default gen_random_uuid(),
+  bag_code text,
+  order_number text,
+  action text not null,
+  detail text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_activity_log_created on activity_log(created_at desc);
 
 -- מפתחות API. נשמר רק hash, לא הערך עצמו.
 -- scope: 'internal' (צוות החנות — /api/orders) | 'supplier' (ספק חיצוני — /api/supplier/*)

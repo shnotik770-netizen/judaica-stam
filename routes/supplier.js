@@ -1,6 +1,7 @@
 import express from "express";
 import { pool } from "../lib/db.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
+import { logActivity } from "../lib/activityLog.js";
 
 export const router = express.Router();
 // ללא אימות בכוונה — החלטת המשתמש: מיכאל אמור להיות מחובר תמיד בלי להזין מפתח כדי לעבוד.
@@ -24,15 +25,23 @@ async function loadBag(code) {
   return rows[0] || null;
 }
 
+// שלב תצוגה למסך "מה אצלי": אספתי (עוד לא נמשך ע"י התוכנה) / נכנס לתוכנה (נמשך) / במסירה לחנות (כבר הוחזר).
+function bagStage(bag) {
+  if (bag.status === "returned") return "returning";
+  return bag.imported_at ? "imported" : "collected";
+}
+
 function serializeBag(bag) {
   return {
     bag_code: bag.bag_code,
     order_number: bag.order_number,
     status: bag.status,
+    stage: bagStage(bag),
     item_type: bag.item_type,
     item_type_note: bag.item_type_note,
     quantity: bag.quantity,
     picked_up_at: bag.picked_up_at,
+    imported_at: bag.imported_at,
     returned_at: bag.returned_at,
     collection_number: bag.collection_number || null,
     collection_started_at: bag.collection_started_at || null,
@@ -64,9 +73,18 @@ router.get("/pending", asyncHandler(async (req, res) => {
   res.json({ bags: rows.map(serializeBag) });
 }));
 
-// כל השקיות שכרגע אצל הספק (נאספו ועוד לא הוחזרו) — למסך "מה אצלי"
+// כל השקיות שכרגע אצל הספק, פלוס מה שהוחזר לאחרונה (שעתיים אחרונות — שלב "במסירה לחנות") — למסך "מה אצלי".
+// קריאה לנתיב הזה היא גם "משיכה" של השקיות לתוכנה שלו — לכן מסמנת imported_at לכל שקית
+// שעוד לא נמשכה (בלי לגעת בשקיות שכבר סומנו).
 router.get("/with-me", asyncHandler(async (req, res) => {
-  const { rows } = await pool.query(BAG_SELECT + " where b.status = 'with_supplier' order by b.picked_up_at asc");
+  await pool.query(
+    "update bags set imported_at = now() where status = 'with_supplier' and imported_at is null"
+  );
+  const { rows } = await pool.query(
+    BAG_SELECT + ` where b.status = 'with_supplier'
+       or (b.status = 'returned' and b.returned_at > now() - interval '2 hours')
+     order by coalesce(b.returned_at, b.picked_up_at) asc`
+  );
   res.json({ bags: rows.map(serializeBag) });
 }));
 
@@ -81,7 +99,7 @@ router.get("/bag/:code", asyncHandler(async (req, res) => {
 }));
 
 // מבצע בפועל מסירה (איסוף) — פתוח/הצטרפות ל"איסוף" + עדכון השקית, בטרנזקציה אחת.
-async function pickupBag(bagId) {
+async function pickupBag(bag) {
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -89,7 +107,7 @@ async function pickupBag(bagId) {
     await client.query(
       `update bags set status='with_supplier', picked_up_at=now(), collection_id=$2, updated_at=now()
        where id=$1`,
-      [bagId, collectionId]
+      [bag.id, collectionId]
     );
     await client.query("commit");
   } catch (e) {
@@ -98,14 +116,16 @@ async function pickupBag(bagId) {
   } finally {
     client.release();
   }
+  logActivity(bag.bag_code, bag.order_number, "picked_up", null);
 }
 
 // מבצע בפועל החזרה
-async function returnBag(bagId, result) {
+async function returnBag(bag, result) {
   await pool.query(
     `update bags set status='returned', returned_at=now(), result=$2, updated_at=now() where id=$1`,
-    [bagId, result ? JSON.stringify(result) : null]
+    [bag.id, result ? JSON.stringify(result) : null]
   );
+  logActivity(bag.bag_code, bag.order_number, "returned", result ? JSON.stringify(result) : null);
 }
 
 // עדכון סטטוס — מזהה לבד אם זו מסירה (איסוף) או החזרה, לפי מצב השקית הנוכחי. לסריקה בודדת
@@ -125,7 +145,7 @@ router.post("/scan", asyncHandler(async (req, res) => {
   const now = Date.now();
 
   if (bag.status === "waiting_pickup") {
-    await pickupBag(bag.id);
+    await pickupBag(bag);
     const fresh = await loadBag(bag_code);
     res.json({ action: "picked_up", bag: serializeBag(fresh) });
     return;
@@ -137,7 +157,7 @@ router.post("/scan", asyncHandler(async (req, res) => {
       res.json({ action: "duplicate", bag: serializeBag(bag) });
       return;
     }
-    await returnBag(bag.id, result);
+    await returnBag(bag, result);
     const fresh = await loadBag(bag_code);
     res.json({ action: "returned", bag: serializeBag(fresh) });
     return;
@@ -177,13 +197,13 @@ router.post("/bulk-scan", asyncHandler(async (req, res) => {
           results.push({ bag_code: code, ok: false, error: "השקית לא ממתינה לאיסוף" });
           continue;
         }
-        await pickupBag(bag.id);
+        await pickupBag(bag);
       } else {
         if (bag.status !== "with_supplier") {
           results.push({ bag_code: code, ok: false, error: "השקית לא אצל הספק" });
           continue;
         }
-        await returnBag(bag.id, null);
+        await returnBag(bag, null);
       }
       const fresh = await loadBag(code);
       results.push({ bag_code: code, ok: true, bag: serializeBag(fresh) });
@@ -210,5 +230,6 @@ router.post("/customer-link", asyncHandler(async (req, res) => {
     res.status(404).json({ error: "לא נמצא לקוח עם הטלפון הזה אצלנו" });
     return;
   }
+  logActivity(null, null, "customer_linked", `phone=${phone} customer_number=${customer_number}`);
   res.json({ ok: true });
 }));

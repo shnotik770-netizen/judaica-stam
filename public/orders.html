@@ -117,7 +117,7 @@
   <div class="tabs">
     <div class="tab active" data-tab="new">הזמנה חדשה</div>
     <div class="tab" data-tab="list">כל ההזמנות</div>
-    <div class="tab" data-tab="scan">סריקה ללקוח</div>
+    <div class="tab" data-tab="admin">ניהול</div>
   </div>
 
   <div id="newPanel">
@@ -167,6 +167,45 @@
       </select>
       <input id="filterCollection" type="number" placeholder="מספר איסוף">
     </div>
+    <input id="filterSearch" placeholder="חיפוש לפי שם / טלפון / מספר הזמנה…">
+
+    <button type="button" class="btn-ghost" id="quickActionToggle">⚡ פעולות מהירות</button>
+
+    <div id="quickActionChooser" class="hidden">
+      <div class="sub" style="margin:0 0 8px;">מה מטרת הפעולה המהירה? (לחיצה על שורה ברשימה תבצע אותה מיד)</div>
+      <div class="purpose-grid">
+        <button type="button" class="purpose-btn" data-purpose="notify">📨 דיווח ללקוח (SMS)</button>
+        <button type="button" class="purpose-btn" data-purpose="collect">📦 מסירה ללקוח</button>
+      </div>
+    </div>
+
+    <div id="quickActionActive" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
+      <div class="purpose-bar">
+        <span id="quickActionLabel"></span>
+        <div style="display:flex;gap:6px;">
+          <button type="button" id="quickScanToggle">📷 סריקה מהירה</button>
+          <button type="button" id="quickActionCancel">בטל</button>
+        </div>
+      </div>
+
+      <div id="quickScanPanel" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
+        <div class="mode-tabs">
+          <div class="mode-tab active" data-mode="device">⌨️ סורק מחובר</div>
+          <div class="mode-tab" data-mode="camera">📷 מצלמה</div>
+        </div>
+        <div id="deviceMode">
+          <input id="scanInput" class="scan-input" placeholder="סרוק ברקוד…">
+        </div>
+        <div id="cameraMode" class="hidden" style="display:flex;flex-direction:column;gap:10px;">
+          <div id="cameraWrap" class="hidden"><div id="cameraReader"></div></div>
+          <button type="button" class="camera-toggle" id="cameraToggle">הפעל מצלמה</button>
+          <div class="camera-hint">סריקה רציפה — תעבירו שקית אחרי שקית מול המצלמה, בלי לצלם/לאשר כל אחת בנפרד</div>
+        </div>
+      </div>
+
+      <div class="log" id="actionLog"></div>
+    </div>
+
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <span style="font-size:13px;color:var(--text-muted);" id="listCount"></span>
       <button class="reload" id="reloadList">רענן</button>
@@ -201,51 +240,36 @@
     <div class="msg" id="editMsg"></div>
   </div>
 
-  <div id="scanPanel" class="card hidden">
-    <div id="purposeSelect">
-      <div class="sub" style="margin:0 0 8px;">מה מטרת הסריקה? (לא מתקדם שלב אוטומטית — תמיד שואל קודם)</div>
-      <div class="purpose-grid">
-        <button type="button" class="purpose-btn" data-purpose="notify">📨 דיווח עדכון ללקוח (SMS)</button>
-        <button type="button" class="purpose-btn" data-purpose="collect">📦 דיווח איסוף ע"י לקוח</button>
+  <div id="adminPanel" class="hidden" style="display:flex;flex-direction:column;gap:16px;">
+    <div class="card">
+      <b>תיקון ידני</b>
+      <div class="sub" style="margin:0;">לתיקון טעויות בלבד — משנה סטטוס שקית ישירות, בלי לעבור דרך הזרימה הרגילה ובלי קשר לנעילה.</div>
+      <div class="grid2">
+        <div class="field"><label>קוד שקית</label><input id="fixBagCode" placeholder="למשל 123401"></div>
+        <div class="field"><label>סטטוס חדש</label>
+          <select id="fixStatus">
+            <option value="waiting_pickup">הוזמן (ממתין לאיסוף)</option>
+            <option value="with_supplier">אצל הספק</option>
+            <option value="returned">חזר</option>
+          </select>
+        </div>
       </div>
+      <div style="display:flex;gap:16px;font-size:13px;flex-wrap:wrap;">
+        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="fixResetNotified" style="width:auto;">אפס "עודכן ללקוח"</label>
+        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="fixResetCollected" style="width:auto;">אפס "נאסף ע"י לקוח"</label>
+      </div>
+      <div class="row-end">
+        <button type="button" class="btn-primary" id="fixApply">עדכן</button>
+      </div>
+      <div class="msg" id="fixMsg"></div>
     </div>
 
-    <div id="scanActive" class="hidden" style="display:flex;flex-direction:column;gap:14px;">
-      <div class="purpose-bar">
-        <span id="purposeLabel"></span>
-        <button type="button" class="btn-ghost" id="changePurpose">שנה מטרה</button>
-      </div>
-
-      <div class="mode-tabs">
-        <div class="mode-tab active" data-mode="device">⌨️ סורק מחובר</div>
-        <div class="mode-tab" data-mode="camera">📷 מצלמה</div>
-      </div>
-
-      <div id="deviceMode">
-        <input id="scanInput" class="scan-input" placeholder="סרוק ברקוד…">
-      </div>
-
-      <div id="cameraMode" class="hidden" style="display:flex;flex-direction:column;gap:10px;">
-        <div id="cameraWrap" class="hidden"><div id="cameraReader"></div></div>
-        <button type="button" class="camera-toggle" id="cameraToggle">הפעל מצלמה</button>
-        <div class="camera-hint">סריקה רציפה — תעבירו שקית אחרי שקית מול המצלמה, בלי לצלם/לאשר כל אחת בנפרד</div>
-      </div>
-
-      <div class="summary">
-        <div class="stat"><b id="sCount">0</b><span>נסרקו</span></div>
-        <div class="stat"><b id="sOk">0</b><span>תקינים</span></div>
-        <div class="stat"><b id="sWarn">0</b><span>דורש בירור</span></div>
-      </div>
-      <div class="log" id="scanLog"></div>
-
-      <div class="sub" style="margin:4px 0 0;">או סמנו ידנית כמה שקיות מהרשימה, בלי לסרוק:</div>
-      <input class="search" id="checklistSearch" placeholder="חיפוש לפי שם / טלפון…" style="margin:0;">
+    <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:13px;color:var(--text-muted);" id="checklistCount"></span>
-        <button class="reload" id="reloadChecklist">רענן</button>
+        <b>יומן פעולות</b>
+        <button class="reload" id="reloadLog">רענן</button>
       </div>
-      <div id="checklistBody" style="display:flex;flex-direction:column;gap:8px;"></div>
-      <button type="button" class="btn-primary" id="applyChecklist">סמן שקיות שנבחרו</button>
+      <div id="activityLogList" style="display:flex;flex-direction:column;gap:7px;max-height:55vh;overflow-y:auto;"></div>
     </div>
   </div>
 
@@ -368,9 +392,10 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   document.getElementById('newPanel').classList.toggle('hidden', tab !== 'new');
   document.getElementById('listPanel').classList.toggle('hidden', tab !== 'list');
   document.getElementById('editPanel').classList.add('hidden');
-  document.getElementById('scanPanel').classList.toggle('hidden', tab !== 'scan');
+  document.getElementById('adminPanel').classList.toggle('hidden', tab !== 'admin');
+  stopCamera();
   if (tab === 'list') loadList();
-  if (tab === 'scan') { if (scanPurpose) scanInput.focus(); } else stopCamera();
+  if (tab === 'admin') loadActivityLog();
 }));
 
 const ITEM_LABELS = {
@@ -397,9 +422,11 @@ async function loadList(){
   const itemType = document.getElementById('filterItemType').value;
   const status = document.getElementById('filterStatus').value;
   const collection = document.getElementById('filterCollection').value;
+  const q = document.getElementById('filterSearch').value.trim();
   if (itemType) params.set('item_type', itemType);
   if (status) params.set('status', status);
   if (collection) params.set('collection_number', collection);
+  if (q) params.set('q', q);
 
   try {
     const res = await fetch(API_BASE + '/api/orders/bags?' + params.toString());
@@ -407,24 +434,31 @@ async function loadList(){
     if (!res.ok) throw new Error(data.error || 'שגיאה');
     countEl.textContent = data.bags.length + ' שקיות';
     listEl.innerHTML = data.bags.map(b => {
-      const when = new Date(b.created_at).toLocaleDateString('he-IL') + (b.created_at_hebrew ? ' · ' + b.created_at_hebrew : '');
+      const when = (b.created_at_hebrew ? b.created_at_hebrew + ' · ' : '') + new Date(b.created_at).toLocaleDateString('he-IL');
       const item = (ITEM_LABELS[b.item_type] || b.item_type) + (b.quantity > 1 ? ' ×' + b.quantity : '');
       const collectionInfo = b.collection_number
         ? ' · איסוף #' + b.collection_number + ' (' + new Date(b.collection_started_at).toLocaleDateString('he-IL') + ')'
         : '';
-      return '<div class="bag-row" data-order="' + b.order_number + '" style="cursor:pointer;">' +
-        '<div><div class="who">' + b.bag_code + ' · ' + b.first_name + ' ' + b.last_name + '</div>' +
+      return '<div class="bag-row" data-order="' + b.order_number + '" data-code="' + b.bag_code + '" style="cursor:pointer;">' +
+        '<div><div class="who">' + b.bag_code + ' · ' + esc(b.first_name) + ' ' + esc(b.last_name) + '</div>' +
         '<div class="sub">הזמנה #' + b.order_number + ' · ' + item + ' · נוצר ' + when + collectionInfo + '</div></div>' +
         statusBadge(b) +
         '</div>';
     }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:20px;">אין שקיות תואמות</div>';
     listEl.querySelectorAll('.bag-row').forEach(row => {
-      row.addEventListener('click', () => openEdit(row.dataset.order));
+      row.addEventListener('click', () => {
+        if (quickAction) applyQuickAction([row.dataset.code]);
+        else openEdit(row.dataset.order);
+      });
     });
   } catch (err) {
     countEl.textContent = 'שגיאה: ' + err.message;
   }
 }
+document.getElementById('filterSearch').addEventListener('input', () => {
+  clearTimeout(window._searchDebounce);
+  window._searchDebounce = setTimeout(loadList, 400);
+});
 
 // --- עריכת/מחיקת הזמנה קיימת, כל עוד לא נכנסה למערכת הספק ---
 function itemTypeOptionsHtml(selected){
@@ -474,7 +508,7 @@ function renderEdit(data){
       '<div class="field"><label>סוג פריט</label><select class="editItemType" data-code="' + b.bag_code + '"' + (editLocked ? ' disabled' : '') + '>' +
         itemTypeOptionsHtml(b.item_type) + '</select></div>' +
       '<div class="field"><label>כמות</label><input type="number" class="editQty" data-code="' + b.bag_code + '" value="' + b.quantity + '" min="1"' + (editLocked ? ' disabled' : '') + '></div>' +
-      '<div class="field"><label>פירוט</label><input class="editNote" data-code="' + b.bag_code + '" value="' + (b.item_type_note || '') + '"' + (editLocked ? ' disabled' : '') + '></div>' +
+      '<div class="field"><label>פירוט</label><input class="editNote" data-code="' + b.bag_code + '" value="' + esc(b.item_type_note || '') + '"' + (editLocked ? ' disabled' : '') + '></div>' +
       '</div></div>';
   }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:12px;">אין שקיות בהזמנה זו</div>';
 
@@ -567,7 +601,10 @@ document.getElementById('filterCollection').addEventListener('input', () => {
   window._filterDebounce = setTimeout(loadList, 400);
 });
 
-// --- סריקה ללקוח (מצב "עודכן"/"נאסף") ---
+// --- פעולות מהירות על רשימת "כל ההזמנות" (דיווח ללקוח / מסירה ללקוח) ---
+function esc(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 function beep(freq, dur){
   try{
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -580,81 +617,77 @@ function beep(freq, dur){
     osc.stop(ctx.currentTime + dur);
   }catch(e){}
 }
-
-let scanCounts = { total:0, ok:0, warn:0 };
-function updateScanSummary(){
-  document.getElementById('sCount').textContent = scanCounts.total;
-  document.getElementById('sOk').textContent = scanCounts.ok;
-  document.getElementById('sWarn').textContent = scanCounts.warn;
-}
-function addScanLog(kind, title, detail){
+function addActionLog(kind, title, detail){
   const el = document.createElement('div');
   el.className = 'entry ' + kind;
   el.innerHTML = '<b></b><div class="d"></div>';
   el.querySelector('b').textContent = title;
   el.querySelector('.d').textContent = detail;
-  document.getElementById('scanLog').appendChild(el);
+  document.getElementById('actionLog').appendChild(el);
 }
 
-// --- בחירת מטרת הסריקה (לא מנוחש אוטומטית) ---
-let scanPurpose = null;
-document.querySelectorAll('.purpose-btn').forEach(b => b.addEventListener('click', () => {
-  scanPurpose = b.dataset.purpose;
-  document.getElementById('purposeSelect').classList.add('hidden');
-  document.getElementById('scanActive').classList.remove('hidden');
-  document.getElementById('purposeLabel').textContent = scanPurpose === 'notify'
-    ? '📨 דיווח עדכון ללקוח (SMS)' : '📦 דיווח איסוף ע"י לקוח';
-  scanCounts = { total:0, ok:0, warn:0 };
-  updateScanSummary();
-  document.getElementById('scanLog').innerHTML = '';
-  loadChecklist();
-  scanInput.focus();
-}));
-document.getElementById('changePurpose').addEventListener('click', () => {
-  stopCamera();
-  scanPurpose = null;
-  document.getElementById('scanActive').classList.add('hidden');
-  document.getElementById('purposeSelect').classList.remove('hidden');
+let quickAction = null; // 'notify' | 'collect' | null — תמיד נבחר מראש ע"י הצוות, לא מנוחש
+
+document.getElementById('quickActionToggle').addEventListener('click', () => {
+  document.getElementById('quickActionChooser').classList.toggle('hidden');
 });
 
-// מפעיל action על קבוצת ברקודים (סריקה בודדת שולחת קוד אחד, הרשימה שולחת כמה בבת אחת)
-async function applyScanAction(codes){
+document.querySelectorAll('.purpose-btn').forEach(b => b.addEventListener('click', () => {
+  quickAction = b.dataset.purpose;
+  document.getElementById('quickActionChooser').classList.add('hidden');
+  document.getElementById('quickActionActive').classList.remove('hidden');
+  document.getElementById('quickActionLabel').textContent = quickAction === 'notify'
+    ? '📨 מצב פעיל: דיווח ללקוח' : '📦 מצב פעיל: מסירה ללקוח';
+  document.getElementById('actionLog').innerHTML = '';
+  loadList();
+}));
+
+document.getElementById('quickActionCancel').addEventListener('click', () => {
+  stopCamera();
+  quickAction = null;
+  document.getElementById('quickScanPanel').classList.add('hidden');
+  document.getElementById('quickActionActive').classList.add('hidden');
+  loadList();
+});
+
+document.getElementById('quickScanToggle').addEventListener('click', () => {
+  const panel = document.getElementById('quickScanPanel');
+  panel.classList.toggle('hidden');
+  if (!panel.classList.contains('hidden')) scanInput.focus(); else stopCamera();
+});
+
+// מפעיל את ה-quickAction הנבחר על קבוצת ברקודים — קליק על שורה שולח קוד אחד, סריקה שולחת אחד בכל פעם
+async function applyQuickAction(codes){
   try {
     const res = await fetch(API_BASE + '/api/orders/scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bag_codes: codes, action: scanPurpose }),
+      body: JSON.stringify({ bag_codes: codes, action: quickAction }),
     });
     const data = await res.json();
     if (!res.ok) {
-      codes.forEach(c => { scanCounts.total++; scanCounts.warn++; addScanLog('warn', c, data.error || 'שגיאה'); });
+      codes.forEach(c => addActionLog('warn', c, data.error || 'שגיאה'));
       beep(220, 0.3);
     } else {
       (data.results || []).forEach(r => {
-        scanCounts.total++;
-        if (!r.ok) { scanCounts.warn++; addScanLog('warn', r.bag_code, r.error || 'שגיאה'); return; }
+        if (!r.ok) { addActionLog('warn', r.bag_code, r.error || 'שגיאה'); return; }
         const who = r.customer.first_name + ' ' + r.customer.last_name;
-        if (r.action === 'notified') {
-          scanCounts.ok++; addScanLog('ok', who + ' — עודכן ללקוח', 'נשלחה הודעה · הזמנה #' + r.order_number);
-        } else if (r.action === 'collected') {
-          scanCounts.ok++; addScanLog('ok', who + ' — נאסף ע"י לקוח', 'הזמנה #' + r.order_number);
-        } else {
-          scanCounts.warn++; addScanLog('warn', who + ' — כבר סומן', 'לא נרשם שוב');
-        }
+        if (r.action === 'notified') addActionLog('ok', who + ' — עודכן ללקוח', 'נשלחה הודעה · הזמנה #' + r.order_number);
+        else if (r.action === 'collected') addActionLog('ok', who + ' — נאסף ע"י לקוח', 'הזמנה #' + r.order_number);
+        else addActionLog('warn', who + ' — כבר סומן', 'לא נרשם שוב');
       });
       beep(880, 0.15);
     }
   } catch (err) {
-    codes.forEach(c => { scanCounts.total++; scanCounts.warn++; addScanLog('err', c, 'שגיאת רשת: ' + err.message); });
+    codes.forEach(c => addActionLog('err', c, 'שגיאת רשת: ' + err.message));
   }
-  updateScanSummary();
+  loadList();
 }
 
 async function processScan(code){
   code = (code || '').trim();
   if (!code) return;
-  await applyScanAction([code]);
-  loadChecklist();
+  await applyQuickAction([code]);
 }
 
 const scanInput = document.getElementById('scanInput');
@@ -664,52 +697,6 @@ scanInput.addEventListener('keydown', async (e) => {
   scanInput.value = '';
   await processScan(code);
   scanInput.focus();
-});
-document.body.addEventListener('click', () => {
-  const scanTabActive = document.querySelector('.tab[data-tab="scan"]').classList.contains('active');
-  const deviceVisible = scanTabActive && scanPurpose && !document.getElementById('deviceMode').classList.contains('hidden');
-  if (deviceVisible) scanInput.focus();
-});
-
-// --- רשימה עם סימון V, כחלופה לסריקה פיזית ---
-let checklistBags = [];
-async function loadChecklist(){
-  if (!scanPurpose) return;
-  const body = document.getElementById('checklistBody');
-  body.innerHTML = '<div style="color:var(--text-muted);padding:10px;">טוען…</div>';
-  const status = scanPurpose === 'notify' ? 'returned_at_store' : 'not_collected';
-  try {
-    const res = await fetch(API_BASE + '/api/orders/bags?status=' + status);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'שגיאה');
-    checklistBags = data.bags;
-    renderChecklist();
-  } catch (err) {
-    body.innerHTML = '<div style="color:var(--danger);padding:10px;">שגיאה: ' + err.message + '</div>';
-  }
-}
-function renderChecklist(){
-  const q = document.getElementById('checklistSearch').value.trim().toLowerCase();
-  const filtered = checklistBags.filter(b => {
-    if (!q) return true;
-    const hay = (b.first_name + ' ' + b.last_name + ' ' + b.phone + ' ' + b.bag_code + ' ' + b.order_number).toLowerCase();
-    return hay.includes(q);
-  });
-  document.getElementById('checklistCount').textContent = filtered.length + ' שקיות מתאימות';
-  document.getElementById('checklistBody').innerHTML = filtered.map(b => {
-    const item = (ITEM_LABELS[b.item_type] || b.item_type) + (b.quantity > 1 ? ' ×' + b.quantity : '');
-    return '<label class="check-row"><input type="checkbox" class="checklistItem" value="' + b.bag_code + '">' +
-      '<div><div class="who">' + b.bag_code + ' · ' + b.first_name + ' ' + b.last_name + '</div>' +
-      '<div class="sub">' + b.phone + ' · הזמנה #' + b.order_number + ' · ' + item + '</div></div></label>';
-  }).join('') || '<div style="color:var(--text-muted);padding:10px;">אין שקיות מתאימות</div>';
-}
-document.getElementById('checklistSearch').addEventListener('input', renderChecklist);
-document.getElementById('reloadChecklist').onclick = loadChecklist;
-document.getElementById('applyChecklist').addEventListener('click', async () => {
-  const codes = [...document.querySelectorAll('.checklistItem:checked')].map(c => c.value);
-  if (codes.length === 0) { alert('לא סומנו שקיות'); return; }
-  await applyScanAction(codes);
-  loadChecklist();
 });
 
 document.querySelectorAll('.mode-tab').forEach(t => t.addEventListener('click', () => {
@@ -757,7 +744,7 @@ async function startCamera(){
     btn.textContent = 'עצור מצלמה';
     btn.classList.add('stop');
   } catch (err) {
-    addScanLog('err', 'מצלמה', 'לא הצלחתי לפתוח מצלמה: ' + (err?.message || err?.name || String(err)));
+    addActionLog('err', 'מצלמה', 'לא הצלחתי לפתוח מצלמה: ' + (err?.message || err?.name || String(err)));
     wrap.classList.add('hidden');
     btn.textContent = 'הפעל מצלמה';
   }
@@ -775,6 +762,61 @@ async function stopCamera(){
 document.getElementById('cameraToggle').addEventListener('click', () => {
   if (cameraRunning) stopCamera(); else startCamera();
 });
+
+// --- ניהול: תיקון ידני + יומן פעולות ---
+document.getElementById('fixApply').addEventListener('click', async () => {
+  const msg = document.getElementById('fixMsg');
+  msg.className = 'msg';
+  const bagCode = document.getElementById('fixBagCode').value.trim();
+  if (!bagCode) { msg.className = 'msg err'; msg.textContent = 'יש להזין קוד שקית.'; return; }
+  const body = {
+    status: document.getElementById('fixStatus').value,
+    reset_notified: document.getElementById('fixResetNotified').checked,
+    reset_collected: document.getElementById('fixResetCollected').checked,
+  };
+  try {
+    const res = await fetch(API_BASE + '/api/orders/bags/' + encodeURIComponent(bagCode) + '/force-status', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה');
+    msg.className = 'msg ok';
+    msg.textContent = 'שקית ' + data.bag_code + ' עודכנה לסטטוס: ' + data.status;
+    loadActivityLog();
+  } catch (err) {
+    msg.className = 'msg err';
+    msg.textContent = err.message;
+  }
+});
+
+const LOG_ACTION_LABELS = {
+  order_created: 'הזמנה נוצרה', order_edited: 'הזמנה נערכה', order_deleted: 'הזמנה נמחקה',
+  bag_added: 'שקית נוספה', bag_deleted: 'שקית נמחקה',
+  picked_up: 'נאסף ע"י הספק', returned: 'הוחזר מהספק',
+  customer_notified: 'עודכן ללקוח', customer_collected: 'נאסף ע"י לקוח',
+  customer_linked: 'דווח מספר לקוח', manual_fix: 'תיקון ידני',
+};
+async function loadActivityLog(){
+  const listEl = document.getElementById('activityLogList');
+  listEl.innerHTML = '<div style="color:var(--text-muted);padding:10px;">טוען…</div>';
+  try {
+    const res = await fetch(API_BASE + '/api/orders/activity-log?limit=100');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה');
+    listEl.innerHTML = data.log.map(entry => {
+      const when = new Date(entry.created_at).toLocaleString('he-IL');
+      const label = LOG_ACTION_LABELS[entry.action] || entry.action;
+      const ref = [entry.bag_code, entry.order_number ? 'הזמנה #' + entry.order_number : null].filter(Boolean).join(' · ');
+      return '<div class="bag-row" style="cursor:default;"><div><div class="who">' + esc(label) + (ref ? ' — ' + esc(ref) : '') + '</div>' +
+        '<div class="sub">' + esc(when) + (entry.detail ? ' · ' + esc(entry.detail) : '') + '</div></div></div>';
+    }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:20px;">אין פעולות עדיין</div>';
+  } catch (err) {
+    listEl.innerHTML = '<div style="color:var(--danger);padding:10px;">שגיאה: ' + esc(err.message) + '</div>';
+  }
+}
+document.getElementById('reloadLog').onclick = loadActivityLog;
 </script>
 </body>
 </html>

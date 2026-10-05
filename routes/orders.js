@@ -4,6 +4,7 @@ import { asyncHandler } from "../lib/asyncHandler.js";
 import { enqueuePrint } from "../lib/printQueue.js";
 import { toHebrewDate } from "../lib/hebrewDate.js";
 import { sendSms } from "../lib/call2all.js";
+import { logActivity } from "../lib/activityLog.js";
 
 export const router = express.Router();
 // ללא אימות בכוונה — החלטת החנות: מי שיש לו גישה לאתר יכול ליצור הזמנות, בלי קוד API.
@@ -119,6 +120,7 @@ router.post("/", asyncHandler(async (req, res) => {
     // הדפסת מדבקה לכל שקית ברגע יצירת ההזמנה — Code128, אותו קוד מספרי שהוחזר בכל שקית.
     for (const b of createdBags) printBagLabel(order_number, customer, b);
 
+    logActivity(null, order_number, "order_created", `${createdBags.length} שקיות`);
     res.status(201).json({ order_number, bags: createdBags });
   } catch (e) {
     await client.query("rollback");
@@ -155,9 +157,9 @@ const BAG_STATUS_CONDITIONS = {
   collected: "b.status = 'returned' and b.customer_collected_at is not null",
 };
 
-// רשימת שקיות עם מסננים — למסך "כל ההזמנות" (סוג פריט, מספר איסוף, סטטוס)
+// רשימת שקיות עם מסננים — למסך "כל ההזמנות" (סוג פריט, מספר איסוף, סטטוס, חיפוש חופשי)
 router.get("/bags", asyncHandler(async (req, res) => {
-  const { item_type, collection_number, status } = req.query;
+  const { item_type, collection_number, status, q } = req.query;
   const conditions = [];
   const params = [];
   if (item_type) { params.push(item_type); conditions.push(`b.item_type = $${params.length}`); }
@@ -167,6 +169,13 @@ router.get("/bags", asyncHandler(async (req, res) => {
     params.push(status); conditions.push(`b.status = $${params.length}`);
   }
   if (collection_number) { params.push(+collection_number); conditions.push(`col.collection_number = $${params.length}`); }
+  if (q && q.trim()) {
+    params.push(`%${q.trim()}%`);
+    conditions.push(
+      `(c.first_name ilike $${params.length} or c.last_name ilike $${params.length} or
+        c.phone ilike $${params.length} or b.bag_code ilike $${params.length} or o.order_number ilike $${params.length})`
+    );
+  }
   const where = conditions.length ? "where " + conditions.join(" and ") : "";
 
   const { rows } = await pool.query(
@@ -237,6 +246,7 @@ router.post("/scan", asyncHandler(async (req, res) => {
       sendSms(bag.phone, `שלום ${bag.first_name}, ההזמנה שלך מספר ${bag.order_number} מוכנה לאיסוף בחנות.`).catch((e) =>
         console.error("sendSms failed", bag.bag_code, e.message)
       );
+      logActivity(bag.bag_code, bag.order_number, "customer_notified", null);
       results.push({ bag_code: code, ok: true, action: "notified", order_number: bag.order_number, customer });
       continue;
     }
@@ -247,10 +257,21 @@ router.post("/scan", asyncHandler(async (req, res) => {
       continue;
     }
     await pool.query("update bags set customer_collected_at = now(), updated_at = now() where id = $1", [bag.id]);
+    logActivity(bag.bag_code, bag.order_number, "customer_collected", null);
     results.push({ bag_code: code, ok: true, action: "collected", order_number: bag.order_number, customer });
   }
 
   res.json({ results });
+}));
+
+// יומן פעולות אחרונות — למסך "ניהול". נרשם לפני ה-route הפרמטרי /:order_number כדי שלא יתבלע בו.
+router.get("/activity-log", asyncHandler(async (req, res) => {
+  const limit = Math.min(+req.query.limit || 100, 500);
+  const { rows } = await pool.query(
+    "select bag_code, order_number, action, detail, created_at from activity_log order by created_at desc limit $1",
+    [limit]
+  );
+  res.json({ log: rows });
 }));
 
 // רשימת כל ההזמנות + סיכום סטטוס שקיות לכל אחת — למסך "כל ההזמנות"
@@ -331,6 +352,7 @@ router.put("/:order_number", asyncHandler(async (req, res) => {
     );
   }
 
+  logActivity(null, req.params.order_number, "order_edited", null);
   res.json({ ok: true });
 }));
 
@@ -370,6 +392,7 @@ router.post("/:order_number/bags", asyncHandler(async (req, res) => {
   );
   const bag = r.rows[0];
   printBagLabel(order.order_number, order, bag);
+  logActivity(bag.bag_code, order.order_number, "bag_added", null);
   res.status(201).json(bag);
 }));
 
@@ -393,6 +416,7 @@ router.delete("/:order_number/bags/:bag_code", asyncHandler(async (req, res) => 
     res.status(404).json({ error: "שקית לא נמצאה בהזמנה הזו" });
     return;
   }
+  logActivity(req.params.bag_code, req.params.order_number, "bag_deleted", null);
   res.json({ deleted: req.params.bag_code });
 }));
 
@@ -408,5 +432,32 @@ router.delete("/:order_number", asyncHandler(async (req, res) => {
     return;
   }
   await pool.query("delete from orders where id = $1", [o.rows[0].id]);
+  logActivity(null, req.params.order_number, "order_deleted", null);
   res.json({ deleted: req.params.order_number });
+}));
+
+// תיקון ידני של סטטוס שקית — עוקף את ה"נעילה" במתכוון, לתיקון טעויות (למשל סריקה שגויה).
+// זהירות: לא מנהל קשרים (collection/טיימר כפילות) כמו הנתיבים הרגילים — שינוי ישיר של status בלבד,
+// עם אפשרות לאפס את חותמות הלקוח. כל שימוש נרשם ביומן הפעולות לצורך מעקב.
+const BAG_STATUSES = ["waiting_pickup", "with_supplier", "returned"];
+router.put("/bags/:bag_code/force-status", asyncHandler(async (req, res) => {
+  const { status, reset_notified, reset_collected } = req.body || {};
+  if (!BAG_STATUSES.includes(status)) {
+    res.status(400).json({ error: `status חייב להיות אחד מ: ${BAG_STATUSES.join(", ")}` });
+    return;
+  }
+  const sets = ["status=$1", "updated_at=now()"];
+  const params = [status, req.params.bag_code];
+  if (reset_notified) sets.push("customer_notified_at=null");
+  if (reset_collected) sets.push("customer_collected_at=null");
+  const { rows } = await pool.query(
+    `update bags set ${sets.join(", ")} where bag_code=$2 returning bag_code, status`,
+    params
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ error: "קוד לא מוכר" });
+    return;
+  }
+  logActivity(req.params.bag_code, null, "manual_fix", `status=${status}`);
+  res.json(rows[0]);
 }));
