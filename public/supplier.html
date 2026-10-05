@@ -61,8 +61,8 @@
   .check-row .who{font-size:13.5px;font-weight:600;}
   .check-row .sub{font-size:11.5px;color:var(--text-muted);margin-top:2px;}
   button.btn-primary{background:var(--accent);color:#fff;border:none;border-radius:9px;padding:11px 16px;font-weight:600;font-size:14px;cursor:pointer;width:100%;}
-  .purpose-bar{display:flex;justify-content:space-between;align-items:center;background:var(--accent-soft);color:var(--accent);border-radius:9px;padding:8px 12px;font-size:13px;font-weight:600;flex-wrap:wrap;gap:8px;}
-  .purpose-bar button{padding:5px 10px;font-size:12px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:7px;cursor:pointer;font-weight:600;}
+  .purpose-bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;background:var(--accent);color:#fff;border-radius:9px;padding:10px 14px;font-size:14px;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.2);}
+  .purpose-bar button{padding:6px 12px;font-size:12.5px;border:none;border-radius:7px;background:#fff;color:var(--accent);font-weight:700;cursor:pointer;}
   .filters2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
 </style>
 </head>
@@ -167,17 +167,19 @@ const ITEM_LABELS = {
 
 // --- tabs ---
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  const wasActive = t.classList.contains('active');
   document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
   t.classList.add('active');
   const tab = t.dataset.tab;
   document.getElementById('scanPanel').classList.toggle('hidden', tab !== 'scan');
   document.getElementById('pendingPanel').classList.toggle('hidden', tab !== 'pending');
   document.getElementById('minePanel').classList.toggle('hidden', tab !== 'mine');
-  stopQuickCamera();
+  if (!wasActive) closeQuickAction();
   if (tab === 'scan') { document.getElementById('scanInput').focus(); return; }
   stopCamera();
   if (tab === 'pending') loadPending(); else loadMine();
 }));
+window.addEventListener('pagehide', () => { stopCamera(); stopQuickCamera(); });
 
 // --- beep ---
 function beep(freq, dur){
@@ -393,11 +395,13 @@ function renderMine(){
   const q = document.getElementById('mineSearch').value.trim().toLowerCase();
   const stage = document.getElementById('mineStage').value;
   const collection = document.getElementById('mineCollection').value;
+  const active = quickAction && quickAction.mount === 'mine';
   const filtered = mineBags.filter(b => matchesSearch(b, q))
     .filter(b => !stage || b.stage === stage)
-    .filter(b => !collection || String(b.collection_number) === String(collection));
+    .filter(b => !collection || String(b.collection_number) === String(collection))
+    // במצב "מסירה לחנות" מציגים רק שקיות שעדיין אפשר למסור (לא כאלה שכבר הוחזרו)
+    .filter(b => !active || b.stage !== 'returning');
   document.getElementById('mineCount').textContent = filtered.length + ' שקיות אצלי כרגע';
-  const active = quickAction && quickAction.mount === 'mine';
   document.getElementById('mineBody').innerHTML = renderRows(filtered, (b) =>
     ' · ' + (STAGE_LABELS[b.stage] || b.stage) +
     (b.picked_up_at ? ' · אצלי מאז ' + new Date(b.picked_up_at).toLocaleDateString('he-IL') : ''), active);

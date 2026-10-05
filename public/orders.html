@@ -99,8 +99,8 @@
   .purpose-grid{display:flex;flex-direction:column;gap:10px;}
   .purpose-btn{background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:16px;font-size:15px;font-weight:600;color:var(--text);text-align:center;cursor:pointer;}
   .purpose-btn:hover{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);}
-  .purpose-bar{display:flex;justify-content:space-between;align-items:center;background:var(--accent-soft);color:var(--accent);border-radius:9px;padding:8px 12px;font-size:13px;font-weight:600;}
-  .purpose-bar button{padding:5px 10px;font-size:12px;}
+  .purpose-bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;background:var(--accent);color:#fff;border-radius:9px;padding:10px 14px;font-size:14px;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.2);}
+  .purpose-bar button{padding:6px 12px;font-size:12.5px;border:none;border-radius:7px;background:#fff;color:var(--accent);font-weight:700;cursor:pointer;}
   .check-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);cursor:pointer;}
   .check-row input{width:auto;flex:none;}
   .check-row .who{font-size:13px;font-weight:600;}
@@ -393,7 +393,7 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   document.getElementById('listPanel').classList.toggle('hidden', tab !== 'list');
   document.getElementById('editPanel').classList.add('hidden');
   document.getElementById('adminPanel').classList.toggle('hidden', tab !== 'admin');
-  stopCamera();
+  if (tab !== 'list') cancelQuickAction();
   if (tab === 'list') loadList();
   if (tab === 'admin') loadActivityLog();
 }));
@@ -420,13 +420,18 @@ async function loadList(){
 
   const params = new URLSearchParams();
   const itemType = document.getElementById('filterItemType').value;
-  const status = document.getElementById('filterStatus').value;
   const collection = document.getElementById('filterCollection').value;
   const q = document.getElementById('filterSearch').value.trim();
   if (itemType) params.set('item_type', itemType);
-  if (status) params.set('status', status);
   if (collection) params.set('collection_number', collection);
   if (q) params.set('q', q);
+  if (quickAction) {
+    // במצב פעולה מהירה מציגים רק שקיות שמתאימות לפעולה הנבחרת — לא לפי המסנן הידני
+    params.set('status', quickAction === 'notify' ? 'returned_at_store' : 'not_collected');
+  } else {
+    const status = document.getElementById('filterStatus').value;
+    if (status) params.set('status', status);
+  }
 
   try {
     const res = await fetch(API_BASE + '/api/orders/bags?' + params.toString());
@@ -639,16 +644,21 @@ document.querySelectorAll('.purpose-btn').forEach(b => b.addEventListener('click
   document.getElementById('quickActionLabel').textContent = quickAction === 'notify'
     ? '📨 מצב פעיל: דיווח ללקוח' : '📦 מצב פעיל: מסירה ללקוח';
   document.getElementById('actionLog').innerHTML = '';
+  document.getElementById('filterStatus').disabled = true;
   loadList();
 }));
 
-document.getElementById('quickActionCancel').addEventListener('click', () => {
+function cancelQuickAction(){
+  if (!quickAction) return;
   stopCamera();
   quickAction = null;
   document.getElementById('quickScanPanel').classList.add('hidden');
   document.getElementById('quickActionActive').classList.add('hidden');
+  document.getElementById('filterStatus').disabled = false;
   loadList();
-});
+}
+document.getElementById('quickActionCancel').addEventListener('click', cancelQuickAction);
+window.addEventListener('pagehide', () => { stopCamera(); });
 
 document.getElementById('quickScanToggle').addEventListener('click', () => {
   const panel = document.getElementById('quickScanPanel');
