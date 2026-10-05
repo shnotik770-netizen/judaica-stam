@@ -36,7 +36,7 @@
   .bag{border:1px solid var(--border);border-radius:11px;padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--surface-2);}
   .bag-head{display:flex;justify-content:space-between;align-items:center;}
   .bag-head b{font-size:13.5px;}
-  .bag-grid{display:grid;grid-template-columns:2fr 1fr auto;gap:10px;align-items:end;}
+  .bag-grid{display:grid;grid-template-columns:2fr 1fr 2fr;gap:10px;align-items:end;}
   @media (max-width:480px){.bag-grid{grid-template-columns:1fr;}}
   button{cursor:pointer;border:none;border-radius:9px;font-family:inherit;font-weight:600;font-size:14px;padding:10px 16px;}
   .btn-primary{background:var(--accent);color:#fff;}
@@ -293,7 +293,7 @@
         </select>
       </div>
       <div class="field"><label>כמות</label><input type="number" class="qty" value="1" min="1"></div>
-      <div class="field note-field" style="display:none"><label>פירוט</label><input class="note" placeholder="כש'אחר'"></div>
+      <div class="field"><label>הערות</label><input class="note" placeholder="הערה לשקית (לא חובה)"></div>
     </div>
   </div>
 </template>
@@ -309,11 +309,6 @@ function addBag(){
   bagCount++;
   const node = tpl.content.cloneNode(true);
   node.querySelector('.bag-head b').textContent = 'שקית ' + bagCount;
-  const select = node.querySelector('.itemType');
-  const noteField = node.querySelector('.note-field');
-  select.addEventListener('change', () => {
-    noteField.style.display = select.value === 'other' ? 'flex' : 'none';
-  });
   node.querySelector('.remove').addEventListener('click', (e) => {
     e.target.closest('.bag').remove();
   });
@@ -444,9 +439,10 @@ async function loadList(){
       const collectionInfo = b.collection_number
         ? ' · איסוף #' + b.collection_number + ' (' + new Date(b.collection_started_at).toLocaleDateString('he-IL') + ')'
         : '';
+      const noteInfo = b.item_type_note ? ' · 📝 ' + esc(b.item_type_note) : '';
       return '<div class="bag-row" data-order="' + b.order_number + '" data-code="' + b.bag_code + '" style="cursor:pointer;">' +
         '<div><div class="who">' + b.bag_code + ' · ' + esc(b.first_name) + ' ' + esc(b.last_name) + '</div>' +
-        '<div class="sub">הזמנה #' + b.order_number + ' · ' + item + ' · נוצר ' + when + collectionInfo + '</div></div>' +
+        '<div class="sub">הזמנה #' + b.order_number + ' · ' + item + ' · נוצר ' + when + collectionInfo + noteInfo + '</div></div>' +
         statusBadge(b) +
         '</div>';
     }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:20px;">אין שקיות תואמות</div>';
@@ -513,7 +509,7 @@ function renderEdit(data){
       '<div class="field"><label>סוג פריט</label><select class="editItemType" data-code="' + b.bag_code + '"' + (editLocked ? ' disabled' : '') + '>' +
         itemTypeOptionsHtml(b.item_type) + '</select></div>' +
       '<div class="field"><label>כמות</label><input type="number" class="editQty" data-code="' + b.bag_code + '" value="' + b.quantity + '" min="1"' + (editLocked ? ' disabled' : '') + '></div>' +
-      '<div class="field"><label>פירוט</label><input class="editNote" data-code="' + b.bag_code + '" value="' + esc(b.item_type_note || '') + '"' + (editLocked ? ' disabled' : '') + '></div>' +
+      '<div class="field"><label>הערות</label><input class="editNote" data-code="' + b.bag_code + '" placeholder="הערה לשקית (לא חובה)" value="' + esc(b.item_type_note || '') + '"' + (editLocked ? ' disabled' : '') + '></div>' +
       '</div></div>';
   }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:12px;">אין שקיות בהזמנה זו</div>';
 
