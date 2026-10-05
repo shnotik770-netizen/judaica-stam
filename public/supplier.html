@@ -31,9 +31,6 @@
   .tab{flex:1;text-align:center;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--surface);cursor:pointer;font-weight:600;font-size:14px;}
   .tab.active{background:var(--accent);color:#fff;border-color:var(--accent);}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:14px;}
-  .key-bar{display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--text-muted);}
-  .key-bar input{flex:1;font-size:12.5px;padding:6px 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);}
-  .key-bar button{padding:6px 10px;font-size:12px;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:7px;cursor:pointer;}
   .scan-input{width:100%;padding:16px;font-size:20px;border:2px solid var(--accent);border-radius:12px;text-align:center;font-family:ui-monospace,monospace;background:var(--surface);color:var(--text);}
   .summary{display:flex;gap:10px;}
   .stat{flex:1;text-align:center;background:var(--surface-2);border-radius:10px;padding:10px;}
@@ -70,14 +67,6 @@
 <body>
 <div class="wrap">
   <h1>חב"ד יודאייקה — איסוף והחזרה</h1>
-
-  <div class="card">
-    <div class="key-bar">
-      <span>מפתח:</span>
-      <input type="password" id="apiKey" placeholder="הדבק כאן פעם אחת">
-      <button id="saveKey">שמור</button>
-    </div>
-  </div>
 
   <div class="tabs">
     <div class="tab active" data-tab="scan">סריקה</div>
@@ -134,15 +123,6 @@
 </div>
 
 <script>
-const keyInput = document.getElementById('apiKey');
-const saved = localStorage.getItem('jstam_supplier_key');
-if (saved) keyInput.value = saved;
-document.getElementById('saveKey').onclick = () => {
-  localStorage.setItem('jstam_supplier_key', keyInput.value.trim());
-  alert('נשמר');
-};
-function getKey(){ return localStorage.getItem('jstam_supplier_key'); }
-
 const ITEM_LABELS = {
   tefillin_pair:'תפילין זוג', tefillin_head:'תפילין ראש', tefillin_hand:'תפילין יד',
   mezuzah:'מזוזה', megillah:'מגילה', sefer_torah:'ספר תורה', nach:'נ"ך', other:'אחר',
@@ -195,14 +175,12 @@ function addLog(kind, title, detail){
 async function processScan(code){
   code = (code || '').trim();
   if (!code) return;
-  const key = getKey();
-  if (!key) { addLog('err', 'אין מפתח', 'הדבק ושמור מפתח למעלה'); return; }
 
   counts.total++;
   try {
     const res = await fetch('/api/supplier/scan', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ bag_code: code }),
     });
     const data = await res.json();
@@ -327,13 +305,10 @@ function renderCheckRows(bags, extraLine){
 
 let pendingBags = [];
 async function loadPending(){
-  const key = getKey();
-  const body = document.getElementById('pendingBody');
   const countEl = document.getElementById('pendingCount');
-  if (!key) { countEl.textContent = 'הדבק מפתח קודם'; return; }
   countEl.textContent = 'טוען…';
   try {
-    const res = await fetch('/api/supplier/pending', { headers: { Authorization: 'Bearer ' + key } });
+    const res = await fetch('/api/supplier/pending');
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
     pendingBags = data.bags;
@@ -359,13 +334,10 @@ document.getElementById('pendingApply').addEventListener('click', async () => {
 
 let mineBags = [];
 async function loadMine(){
-  const key = getKey();
-  const body = document.getElementById('mineBody');
   const countEl = document.getElementById('mineCount');
-  if (!key) { countEl.textContent = 'הדבק מפתח קודם'; return; }
   countEl.textContent = 'טוען…';
   try {
-    const res = await fetch('/api/supplier/with-me', { headers: { Authorization: 'Bearer ' + key } });
+    const res = await fetch('/api/supplier/with-me');
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
     mineBags = data.bags;
@@ -391,11 +363,10 @@ document.getElementById('mineApply').addEventListener('click', async () => {
 });
 
 async function bulkScan(bag_codes, action){
-  const key = getKey();
   try {
     const res = await fetch('/api/supplier/bulk-scan', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ bag_codes, action }),
     });
     const data = await res.json();

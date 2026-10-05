@@ -1,10 +1,10 @@
 import express from "express";
 import { pool } from "../lib/db.js";
-import { requireApiKey } from "../lib/apiKey.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 
 export const router = express.Router();
-router.use(requireApiKey("supplier"));
+// ללא אימות בכוונה — החלטת המשתמש: מיכאל אמור להיות מחובר תמיד בלי להזין מפתח כדי לעבוד.
+// (סיכון מודע: כל מי שיגלה/ינחש את ה-URL יכול לקרוא לנתיבים האלה — ראו README ליומן ההחלטה.)
 
 const DUPLICATE_WINDOW_MS = 60 * 1000;
 const COLLECTION_WINDOW_MS = 30 * 60 * 1000; // חלון קיבוץ לאיסוף: סריקה בפער של עד 30 דקות מצטרפת לאותו איסוף
