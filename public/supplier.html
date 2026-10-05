@@ -51,6 +51,14 @@
   th,td{text-align:right;padding:7px 6px;border-bottom:1px solid var(--border);}
   th{color:var(--text-muted);font-weight:600;font-size:12px;}
   .hidden{display:none;}
+  .mode-tabs{display:flex;gap:6px;}
+  .mode-tab{flex:1;text-align:center;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);cursor:pointer;font-size:12.5px;font-weight:600;color:var(--text-muted);}
+  .mode-tab.active{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);}
+  #cameraWrap{position:relative;border-radius:12px;overflow:hidden;background:#000;}
+  #cameraReader{width:100%;}
+  .camera-hint{font-size:12px;color:var(--text-muted);text-align:center;}
+  button.camera-toggle{width:100%;background:var(--accent);color:#fff;border:none;border-radius:10px;padding:12px;font-weight:600;font-size:14px;cursor:pointer;}
+  button.camera-toggle.stop{background:var(--danger);}
 </style>
 </head>
 <body>
@@ -71,7 +79,21 @@
   </div>
 
   <div id="scanPanel" class="card">
-    <input id="scanInput" class="scan-input" placeholder="סרוק ברקוד…" autofocus>
+    <div class="mode-tabs">
+      <div class="mode-tab active" data-mode="device">⌨️ סורק מחובר</div>
+      <div class="mode-tab" data-mode="camera">📷 מצלמה</div>
+    </div>
+
+    <div id="deviceMode">
+      <input id="scanInput" class="scan-input" placeholder="סרוק ברקוד…" autofocus>
+    </div>
+
+    <div id="cameraMode" class="hidden" style="display:flex;flex-direction:column;gap:10px;">
+      <div id="cameraWrap" class="hidden"><div id="cameraReader"></div></div>
+      <button type="button" class="camera-toggle" id="cameraToggle">הפעל מצלמה</button>
+      <div class="camera-hint">סריקה רציפה — תעבירו פריט אחרי פריט מול המצלמה, בלי לצלם/לאשר כל אחד בנפרד</div>
+    </div>
+
     <div class="summary">
       <div class="stat"><b id="sCount">0</b><span>נסרקו</span></div>
       <div class="stat"><b id="sOk">0</b><span>תקינים</span></div>
@@ -79,6 +101,8 @@
     </div>
     <div class="log" id="log"></div>
   </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
   <div id="minePanel" class="card hidden">
     <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -114,7 +138,7 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   const isScan = t.dataset.tab === 'scan';
   document.getElementById('scanPanel').classList.toggle('hidden', !isScan);
   document.getElementById('minePanel').classList.toggle('hidden', isScan);
-  if (!isScan) loadMine();
+  if (!isScan) { stopCamera(); loadMine(); }
   else document.getElementById('scanInput').focus();
 }));
 
@@ -148,11 +172,9 @@ function addLog(kind, title, detail){
   document.getElementById('log').appendChild(el);
 }
 
-const scanInput = document.getElementById('scanInput');
-scanInput.addEventListener('keydown', async (e) => {
-  if (e.key !== 'Enter') return;
-  const code = scanInput.value.trim();
-  scanInput.value = '';
+// מטפל בקוד שהתקבל, בין אם הוקלד/נסרק ע"י סורק מחובר ובין אם זוהה ע"י המצלמה
+async function processScan(code){
+  code = (code || '').trim();
   if (!code) return;
   const key = getKey();
   if (!key) { addLog('err', 'אין מפתח', 'הדבק ושמור מפתח למעלה'); return; }
@@ -185,9 +207,87 @@ scanInput.addEventListener('keydown', async (e) => {
     addLog('err', code, 'שגיאת רשת: ' + err.message);
   }
   updateSummary();
+}
+
+// --- מצב סורק מחובר (keyboard-wedge) ---
+const scanInput = document.getElementById('scanInput');
+scanInput.addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter') return;
+  const code = scanInput.value.trim();
+  scanInput.value = '';
+  await processScan(code);
   scanInput.focus();
 });
-document.body.addEventListener('click', () => { if (!document.getElementById('scanPanel').classList.contains('hidden')) scanInput.focus(); });
+document.body.addEventListener('click', () => {
+  const deviceVisible = !document.getElementById('scanPanel').classList.contains('hidden') &&
+                         !document.getElementById('deviceMode').classList.contains('hidden');
+  if (deviceVisible) scanInput.focus();
+});
+
+// --- מצב מצלמה — סריקה רציפה, בלי לצלם/לאשר כל קוד בנפרד ---
+document.querySelectorAll('.mode-tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.mode-tab').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  const isDevice = t.dataset.mode === 'device';
+  document.getElementById('deviceMode').classList.toggle('hidden', !isDevice);
+  document.getElementById('cameraMode').classList.toggle('hidden', isDevice);
+  if (isDevice) { stopCamera(); scanInput.focus(); }
+}));
+
+let html5Qr = null;
+let cameraRunning = false;
+const recentlySeen = new Map(); // code -> timestamp, מונע עיבוד כפול של אותו קוד בזמן שהוא עדיין מול המצלמה
+const CAMERA_DEBOUNCE_MS = 3000;
+
+async function onCameraDecode(decodedText){
+  const now = Date.now();
+  const last = recentlySeen.get(decodedText);
+  if (last && now - last < CAMERA_DEBOUNCE_MS) return; // אותו קוד עדיין בשדה הראייה — מתעלמים
+  recentlySeen.set(decodedText, now);
+  await processScan(decodedText);
+}
+
+async function startCamera(){
+  const wrap = document.getElementById('cameraWrap');
+  const btn = document.getElementById('cameraToggle');
+  wrap.classList.remove('hidden');
+  btn.textContent = 'עוצר…';
+  html5Qr = new Html5Qrcode('cameraReader', {
+    formatsToSupport: [
+      Html5QrcodeSupportedFormats.CODE_128,
+      Html5QrcodeSupportedFormats.QR_CODE,
+    ],
+    verbose: false,
+  });
+  try {
+    await html5Qr.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 260, height: 120 } },
+      onCameraDecode,
+      () => {} // שגיאת פענוח פריים בודד — מתעלמים, זה קורה כל הזמן בין סריקות תקינות
+    );
+    cameraRunning = true;
+    btn.textContent = 'עצור מצלמה';
+    btn.classList.add('stop');
+  } catch (err) {
+    addLog('err', 'מצלמה', 'לא הצלחתי לפתוח מצלמה: ' + (err?.message || err?.name || String(err)));
+    wrap.classList.add('hidden');
+    btn.textContent = 'הפעל מצלמה';
+  }
+}
+
+async function stopCamera(){
+  if (!cameraRunning || !html5Qr) return;
+  try { await html5Qr.stop(); html5Qr.clear(); } catch (e) {}
+  cameraRunning = false;
+  document.getElementById('cameraWrap').classList.add('hidden');
+  document.getElementById('cameraToggle').textContent = 'הפעל מצלמה';
+  document.getElementById('cameraToggle').classList.remove('stop');
+}
+
+document.getElementById('cameraToggle').addEventListener('click', () => {
+  if (cameraRunning) stopCamera(); else startCamera();
+});
 
 // --- mine ---
 async function loadMine(){
