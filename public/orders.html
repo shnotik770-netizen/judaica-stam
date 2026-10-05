@@ -96,8 +96,8 @@
   .entry.err{background:var(--danger-soft);color:var(--danger);border-color:var(--danger);}
   .entry b{display:block;font-size:14.5px;}
   .entry .d{opacity:.85;font-size:12.5px;margin-top:2px;}
-  .purpose-grid{display:flex;flex-direction:column;gap:10px;}
-  .purpose-btn{background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:16px;font-size:15px;font-weight:600;color:var(--text);text-align:center;cursor:pointer;}
+  .purpose-grid{display:flex;flex-direction:row;flex-wrap:wrap;gap:10px;}
+  .purpose-btn{flex:1 1 0;min-width:110px;background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:14px 8px;font-size:13.5px;font-weight:600;color:var(--text);text-align:center;cursor:pointer;}
   .purpose-btn:hover{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);}
   .purpose-bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;background:var(--accent);color:#fff;border-radius:9px;padding:10px 14px;font-size:14px;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.2);}
   .purpose-bar button{padding:6px 12px;font-size:12.5px;border:none;border-radius:7px;background:#fff;color:var(--accent);font-weight:700;cursor:pointer;}
@@ -280,6 +280,7 @@
         <b>יומן פעולות</b>
         <button class="reload" id="reloadLog">רענן</button>
       </div>
+      <input id="logBagFilter" placeholder="סינון לפי קוד שקית (ריק = הכל)">
       <div id="activityLogList" style="display:flex;flex-direction:column;gap:7px;max-height:55vh;overflow-y:auto;"></div>
     </div>
   </div>
@@ -514,8 +515,9 @@ function renderEdit(data){
 
   document.getElementById('editBags').innerHTML = data.bags.map(b => {
     const delBtn = editLocked ? '' : '<button type="button" class="btn-danger editDelBag" data-code="' + b.bag_code + '">מחק שקית</button>';
+    const reprintBtn = '<button type="button" class="btn-ghost editReprint" data-code="' + b.bag_code + '" style="padding:6px 10px;font-size:12.5px;">🖨️ הדפס שוב</button>';
     return '<div class="bag">' +
-      '<div class="bag-head"><b>' + b.bag_code + ' · ' + statusBadge(b) + '</b>' + delBtn + '</div>' +
+      '<div class="bag-head"><b>' + b.bag_code + ' · ' + statusBadge(b) + '</b><div style="display:flex;gap:8px;">' + reprintBtn + delBtn + '</div></div>' +
       '<div class="bag-grid">' +
       '<div class="field"><label>סוג פריט</label><select class="editItemType" data-code="' + b.bag_code + '"' + (editLocked ? ' disabled' : '') + '>' +
         itemTypeOptionsHtml(b.item_type) + '</select></div>' +
@@ -533,6 +535,20 @@ function renderEdit(data){
       openEdit(editOrderNumber);
     } catch (err) {
       alert(err.message);
+    }
+  }));
+
+  document.querySelectorAll('.editReprint').forEach(btn => btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      const res = await fetch(API_BASE + '/api/orders/bags/' + encodeURIComponent(btn.dataset.code) + '/reprint', { method: 'POST' });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'שגיאה');
+      btn.textContent = '🖨️ נשלח להדפסה';
+      setTimeout(() => { btn.textContent = '🖨️ הדפס שוב'; btn.disabled = false; }, 2000);
+    } catch (err) {
+      alert(err.message);
+      btn.disabled = false;
     }
   }));
 }
@@ -679,31 +695,39 @@ document.getElementById('quickScanToggle').addEventListener('click', () => {
 });
 
 // מפעיל את ה-quickAction הנבחר על קבוצת ברקודים — קליק על שורה שולח קוד אחד, סריקה שולחת אחד בכל פעם
-async function applyQuickAction(codes){
+async function applyQuickAction(codes, force){
   try {
     const res = await fetch(API_BASE + '/api/orders/scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bag_codes: codes, action: quickAction }),
+      body: JSON.stringify({ bag_codes: codes, action: quickAction, force: !!force }),
     });
     const data = await res.json();
     if (!res.ok) {
       codes.forEach(c => addActionLog('warn', c, data.error || 'שגיאה'));
       beep(220, 0.3);
     } else {
-      (data.results || []).forEach(r => {
-        if (!r.ok) { addActionLog('warn', r.bag_code, r.error || 'שגיאה'); return; }
+      for (const r of (data.results || [])) {
+        if (!r.ok) { addActionLog('warn', r.bag_code, r.error || 'שגיאה'); continue; }
         const who = r.customer.first_name + ' ' + r.customer.last_name;
         if (r.action === 'notified') {
           const extra = r.grouped_bag_codes && r.grouped_bag_codes.length > 1
             ? ' · קובצו ' + r.grouped_bag_codes.length + ' שקיות של אותו טלפון' : '';
-          addActionLog('ok', who + ' — עודכן ללקוח', 'הזמנה #' + r.order_number + extra);
+          addActionLog('ok', who + (r.repeat ? ' — דווח שוב' : ' — עודכן ללקוח'), 'הזמנה #' + r.order_number + extra);
         } else if (r.action === 'collected') {
           addActionLog('ok', who + ' — נאסף ע"י לקוח', 'הזמנה #' + r.order_number);
+        } else if (!force && (quickAction === 'notify_manual' || quickAction === 'notify_sms')) {
+          // כבר דווח בעבר — שואלים אם לדווח שוב במתכוון (לא אוטומטי)
+          const when = r.notified_at ? new Date(r.notified_at).toLocaleString('he-IL') : '';
+          if (confirm('השקית ' + r.bag_code + ' כבר דווחה ללקוח' + (when ? ' ב-' + when : '') + '. לדווח שוב בכל זאת?')) {
+            await applyQuickAction([r.bag_code], true);
+          } else {
+            addActionLog('warn', who + ' — בוטל', 'לא נשלח דיווח חוזר');
+          }
         } else {
-          addActionLog('warn', who + ' — כבר דווח', r.message || 'לא נרשם שוב');
+          addActionLog('warn', who + ' — כבר סומן', r.message || 'לא נרשם שוב');
         }
-      });
+      }
       beep(880, 0.15);
     }
   } catch (err) {
@@ -849,7 +873,7 @@ document.getElementById('smsTemplateSave').addEventListener('click', async () =>
 
 const LOG_ACTION_LABELS = {
   order_created: 'הזמנה נוצרה', order_edited: 'הזמנה נערכה', order_deleted: 'הזמנה נמחקה',
-  bag_added: 'שקית נוספה', bag_deleted: 'שקית נמחקה',
+  bag_added: 'שקית נוספה', bag_deleted: 'שקית נמחקה', label_reprinted: 'מדבקה הודפסה שוב',
   picked_up: 'נאסף ע"י הספק', returned: 'הוחזר מהספק',
   customer_notified: 'עודכן ללקוח', customer_collected: 'נאסף ע"י לקוח',
   customer_linked: 'דווח מספר לקוח', manual_fix: 'תיקון ידני', settings_changed: 'הגדרה עודכנה',
@@ -857,8 +881,11 @@ const LOG_ACTION_LABELS = {
 async function loadActivityLog(){
   const listEl = document.getElementById('activityLogList');
   listEl.innerHTML = '<div style="color:var(--text-muted);padding:10px;">טוען…</div>';
+  const bagFilter = document.getElementById('logBagFilter').value.trim();
+  const params = new URLSearchParams({ limit: '100' });
+  if (bagFilter) params.set('bag_code', bagFilter);
   try {
-    const res = await fetch(API_BASE + '/api/orders/activity-log?limit=100');
+    const res = await fetch(API_BASE + '/api/orders/activity-log?' + params.toString());
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'שגיאה');
     listEl.innerHTML = data.log.map(entry => {
@@ -873,6 +900,10 @@ async function loadActivityLog(){
   }
 }
 document.getElementById('reloadLog').onclick = loadActivityLog;
+document.getElementById('logBagFilter').addEventListener('input', () => {
+  clearTimeout(window._logFilterDebounce);
+  window._logFilterDebounce = setTimeout(loadActivityLog, 400);
+});
 </script>
 </body>
 </html>

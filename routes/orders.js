@@ -232,13 +232,15 @@ async function loadBagForScan(code) {
   return rows[0] || null;
 }
 
-// כל השקיות של אותו טלפון שעוד לא עודכנו ללקוח (כולל השקית הנסרקת עצמה) — כדי שדיווח אחד
-// יכסה את כולן בבת אחת, בלי צורך לדווח כל שקית בנפרד כשכמה הזמנות חזרו יחד לאותו לקוח.
-async function findUnnotifiedGroup(phone) {
+// כל השקיות של אותו טלפון שחזרו מהספק (כולל השקית הנסרקת עצמה) — כדי שדיווח אחד יכסה את כולן
+// בבת אחת, בלי צורך לדווח כל שקית בנפרד כשכמה הזמנות חזרו יחד לאותו לקוח. ב-force (דיווח חוזר
+// מכוון) כוללים גם שקיות שכבר עודכנו בעבר — לא רק את מה שעדיין ממתין.
+async function findReturnedGroup(phone, { onlyUnnotified }) {
+  const cond = onlyUnnotified ? "and b.customer_notified_at is null" : "";
   const { rows } = await pool.query(
     `select b.id, b.bag_code, b.item_type, b.quantity, o.order_number
      from bags b join orders o on o.id = b.order_id join customers c on c.id = o.customer_id
-     where c.phone = $1 and b.status = 'returned' and b.customer_notified_at is null`,
+     where c.phone = $1 and b.status = 'returned' ${cond}`,
     [phone]
   );
   return rows;
@@ -249,9 +251,11 @@ async function findUnnotifiedGroup(phone) {
 // וכד') בלי לשלוח כלום; "notify_sms" שולח SMS אמיתי ורק אם נשלח בהצלחה מסמן כמו notify_manual;
 // "collect" מסמן שנאסף ע"י הלקוח. notify_* מקבצים לפי מספר טלפון — דיווח על שקית אחת מסמן
 // אוטומטית את כל שקיות אותו טלפון שעדיין לא עודכנו (למשל כמה הזמנות שחזרו ביחד). תומך בכמה
-// שקיות בבת אחת (bag_codes) — לסריקה רציפה או ללחיצה מרשימה.
+// שקיות בבת אחת (bag_codes) — לסריקה רציפה או ללחיצה מרשימה. `force:true` מדווח/שולח שוב
+// במתכוון גם על שקית שכבר עודכנה (ה-UI מציג אזהרה ומבקש אישור מפורש לפני שליחת force) — כל
+// פעם (כולל חוזרות) נרשמת ביומן הפעולות, כך שההיסטוריה המלאה של כל הדיווחים על שקית נשמרת.
 router.post("/scan", asyncHandler(async (req, res) => {
-  const { bag_codes, action } = req.body || {};
+  const { bag_codes, action, force } = req.body || {};
   if (!Array.isArray(bag_codes) || bag_codes.length === 0) {
     res.status(400).json({ error: "bag_codes נדרש" });
     return;
@@ -276,15 +280,17 @@ router.post("/scan", asyncHandler(async (req, res) => {
     }
 
     if (action === "notify_manual" || action === "notify_sms") {
-      if (bag.customer_notified_at) {
+      if (bag.customer_notified_at && !force) {
         results.push({
           bag_code: code, ok: true, action: "duplicate", order_number: bag.order_number, customer,
           message: "הלקוח כבר עודכן — ככל הנראה כחלק מדיווח על שקית אחרת שלו",
+          notified_at: bag.customer_notified_at,
         });
         continue;
       }
 
-      const group = await findUnnotifiedGroup(bag.phone);
+      const isRepeat = Boolean(bag.customer_notified_at);
+      const group = await findReturnedGroup(bag.phone, { onlyUnnotified: !force });
       if (action === "notify_sms") {
         const template = await getSetting("sms_notify_template", DEFAULT_SMS_TEMPLATE);
         const message = template.replace("{items}", summarizeItems(group));
@@ -301,12 +307,13 @@ router.post("/scan", asyncHandler(async (req, res) => {
         [group.map((g) => g.id)]
       );
       const groupNote = group.length > 1 ? ` · קובצו ${group.length} שקיות של אותו טלפון` : "";
+      const repeatNote = isRepeat ? " · דיווח חוזר" : "";
       for (const g of group) {
-        logActivity(g.bag_code, g.order_number, "customer_notified", (action === "notify_sms" ? "SMS" : "ידני") + groupNote);
+        logActivity(g.bag_code, g.order_number, "customer_notified", (action === "notify_sms" ? "SMS" : "ידני") + groupNote + repeatNote);
       }
       results.push({
         bag_code: code, ok: true, action: "notified", order_number: bag.order_number, customer,
-        grouped_bag_codes: group.map((g) => g.bag_code),
+        grouped_bag_codes: group.map((g) => g.bag_code), repeat: isRepeat,
       });
       continue;
     }
@@ -341,8 +348,18 @@ router.put("/settings", asyncHandler(async (req, res) => {
 }));
 
 // יומן פעולות אחרונות — למסך "ניהול". נרשם לפני ה-route הפרמטרי /:order_number כדי שלא יתבלע בו.
+// אפשר לסנן לפי bag_code כדי לראות את כל ההיסטוריה של שקית ספציפית (כולל כל הפעמים שדווחה).
 router.get("/activity-log", asyncHandler(async (req, res) => {
   const limit = Math.min(+req.query.limit || 100, 500);
+  const bagCode = (req.query.bag_code || "").trim();
+  if (bagCode) {
+    const { rows } = await pool.query(
+      "select bag_code, order_number, action, detail, created_at from activity_log where bag_code = $1 order by created_at desc limit $2",
+      [bagCode, limit]
+    );
+    res.json({ log: rows });
+    return;
+  }
   const { rows } = await pool.query(
     "select bag_code, order_number, action, detail, created_at from activity_log order by created_at desc limit $1",
     [limit]
@@ -536,4 +553,23 @@ router.put("/bags/:bag_code/force-status", asyncHandler(async (req, res) => {
   }
   logActivity(req.params.bag_code, null, "manual_fix", `status=${status}`);
   res.json(rows[0]);
+}));
+
+// הדפסה חוזרת של מדבקה — למשל אחרי שההדפסה המקורית נכשלה (PRINT_URL/PRINT_KEY לא היו מוגדרים
+// עדיין), או שהמדבקה הפיזית אבדה/נקרעה. מותר גם על הזמנה נעולה — לא משנה שום מצב, רק מדפיס שוב.
+router.post("/bags/:bag_code/reprint", asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    `select b.bag_code, b.item_type, b.quantity, o.order_number, c.first_name, c.last_name, c.phone
+     from bags b join orders o on o.id = b.order_id join customers c on c.id = o.customer_id
+     where b.bag_code = $1`,
+    [req.params.bag_code]
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ error: "קוד לא מוכר" });
+    return;
+  }
+  const bag = rows[0];
+  printBagLabel(bag.order_number, bag, bag);
+  logActivity(bag.bag_code, bag.order_number, "label_reprinted", null);
+  res.json({ ok: true });
 }));
