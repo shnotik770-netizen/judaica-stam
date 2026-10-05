@@ -52,14 +52,31 @@
   .key-bar input{flex:1;font-size:12.5px;padding:6px 10px;}
   .key-bar button{padding:6px 10px;font-size:12px;}
   .codes{font-family:ui-monospace,monospace;font-size:13px;background:var(--surface-2);border-radius:8px;padding:8px 10px;margin-top:6px;}
+  .tabs{display:flex;gap:8px;}
+  .tab{flex:1;text-align:center;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--surface);cursor:pointer;font-weight:600;font-size:14px;}
+  .tab.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .hidden{display:none;}
+  .order-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px;border:1px solid var(--border);border-radius:11px;background:var(--surface);}
+  .order-row .who{font-size:14px;font-weight:600;}
+  .order-row .sub{font-size:12px;color:var(--text-muted);margin-top:2px;}
+  .badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:100px;white-space:nowrap;}
+  .badge.done{background:var(--ok-soft);color:var(--ok);}
+  .badge.progress{background:#fbf0e3;color:#8a5a1f;}
+  .badge.waiting{background:#eef0fb;color:#3d4a9e;}
+  button.reload{background:var(--accent-soft);color:var(--accent);border:none;border-radius:9px;padding:8px 14px;font-weight:600;cursor:pointer;font-size:13px;}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div>
-    <h1>הזמנה חדשה</h1>
-    <div class="sub">כל שקית מודפסת מיד כמדבקה נפרדת עם ברקוד — אפשר להוסיף כמה שקיות שרוצים באותה הזמנה.</div>
+  <h1>חנות יודאייקה</h1>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="new">הזמנה חדשה</div>
+    <div class="tab" data-tab="list">כל ההזמנות</div>
   </div>
+
+  <div id="newPanel">
+  <div class="sub">כל שקית מודפסת מיד כמדבקה נפרדת עם ברקוד — אפשר להוסיף כמה שקיות שרוצים באותה הזמנה.</div>
 
   <form class="card" id="orderForm">
     <div class="grid2">
@@ -79,6 +96,15 @@
     </div>
     <div class="msg" id="msg"></div>
   </form>
+  </div>
+
+  <div id="listPanel" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-size:13px;color:var(--text-muted);" id="listCount"></span>
+      <button class="reload" id="reloadList">רענן</button>
+    </div>
+    <div id="ordersList" style="display:flex;flex-direction:column;gap:9px;"></div>
+  </div>
 </div>
 
 <template id="bagTpl">
@@ -162,11 +188,54 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
       data.bags.map(b => b.bag_code).join(' · ') + '</div>';
     e.target.reset();
     bagsEl.innerHTML = ''; bagCount = 0; addBag();
+    if (!document.getElementById('listPanel').classList.contains('hidden')) loadList();
   } catch (err) {
     msg.className = 'msg err';
     msg.textContent = err.message;
   }
 });
+
+// --- תצוגת כל ההזמנות ---
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  const isNew = t.dataset.tab === 'new';
+  document.getElementById('newPanel').classList.toggle('hidden', !isNew);
+  document.getElementById('listPanel').classList.toggle('hidden', isNew);
+  if (!isNew) loadList();
+}));
+
+function statusBadge(o){
+  const total = +o.bag_count;
+  const returned = +o.returned_count;
+  const withSupplier = +o.with_supplier_count;
+  if (total > 0 && returned === total) return '<span class="badge done">הושלמה</span>';
+  if (withSupplier > 0 || returned > 0) return '<span class="badge progress">בטיפול (' + returned + '/' + total + ' חזרו)</span>';
+  return '<span class="badge waiting">ממתינה לאיסוף</span>';
+}
+
+async function loadList(){
+  const listEl = document.getElementById('ordersList');
+  const countEl = document.getElementById('listCount');
+  countEl.textContent = 'טוען…';
+  try {
+    const res = await fetch(API_BASE + '/api/orders');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה');
+    countEl.textContent = data.orders.length + ' הזמנות';
+    listEl.innerHTML = data.orders.map(o => {
+      const when = new Date(o.created_at).toLocaleDateString('he-IL');
+      return '<div class="order-row">' +
+        '<div><div class="who">#' + o.order_number + ' · ' + o.first_name + ' ' + o.last_name + '</div>' +
+        '<div class="sub">' + o.phone + ' · ' + o.bag_count + ' שקיות · נוצרה ' + when + '</div></div>' +
+        statusBadge(o) +
+        '</div>';
+    }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:20px;">אין עדיין הזמנות</div>';
+  } catch (err) {
+    countEl.textContent = 'שגיאה: ' + err.message;
+  }
+}
+document.getElementById('reloadList').onclick = loadList;
 </script>
 </body>
 </html>

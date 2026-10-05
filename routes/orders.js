@@ -111,6 +111,23 @@ router.post("/", asyncHandler(async (req, res) => {
   }
 }));
 
+// רשימת כל ההזמנות + סיכום סטטוס שקיות לכל אחת — למסך "כל ההזמנות"
+router.get("/", asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    `select o.order_number, o.created_at, c.first_name, c.last_name, c.phone,
+            count(b.id) as bag_count,
+            count(b.id) filter (where b.status = 'waiting_pickup') as waiting_count,
+            count(b.id) filter (where b.status = 'with_supplier') as with_supplier_count,
+            count(b.id) filter (where b.status = 'returned') as returned_count
+     from orders o
+     join customers c on c.id = o.customer_id
+     left join bags b on b.order_id = o.id
+     group by o.id, c.id
+     order by o.created_at desc`
+  );
+  res.json({ orders: rows });
+}));
+
 // צפייה בהזמנה — לבדיקה/שימוש פנימי
 router.get("/:order_number", asyncHandler(async (req, res) => {
   const o = await pool.query(
