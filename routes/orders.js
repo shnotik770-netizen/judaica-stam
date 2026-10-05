@@ -32,11 +32,12 @@ const ITEM_TYPE_LABELS = {
 // למשל הזמנה 1234, שקית 2 -> "123402".
 const makeBagCode = (orderNumber, bagIndex) => `${orderNumber}${String(bagIndex).padStart(2, "0")}`;
 
-// יצירת הזמנה + שקיות. מספר הזמנה מונפק אוטומטית (רץ). מספר הלקוח קבוע: אם קיים — נעשה שימוש בלקוח הקיים, אחרת נוצר חדש.
+// יצירת הזמנה + שקיות. מספר הזמנה מונפק אוטומטית (רץ). אין מספר לקוח — מזהים לפי טלפון
+// (אם כבר קיים לקוח עם אותו טלפון, מעדכנים את הפרטים שלו ומשתמשים באותו רשומה; אחרת יוצרים חדש).
 router.post("/", asyncHandler(async (req, res) => {
   const { customer, bags } = req.body || {};
-  if (!customer?.customer_number || !Array.isArray(bags) || bags.length === 0) {
-    res.status(400).json({ error: "customer.customer_number ו-bags נדרשים" });
+  if (!customer?.phone || !customer?.first_name || !customer?.last_name || !Array.isArray(bags) || bags.length === 0) {
+    res.status(400).json({ error: "customer (first_name, last_name, phone, address) ו-bags נדרשים" });
     return;
   }
   for (const b of bags) {
@@ -50,14 +51,22 @@ router.post("/", asyncHandler(async (req, res) => {
   try {
     await client.query("begin");
 
-    const cust = await client.query(
-      `insert into customers (customer_number, first_name, last_name, phone, address)
-       values ($1,$2,$3,$4,$5)
-       on conflict (customer_number) do update set customer_number = excluded.customer_number
-       returning id`,
-      [customer.customer_number, customer.first_name, customer.last_name, customer.phone, customer.address]
-    );
-    const customerId = cust.rows[0].id;
+    const existing = await client.query("select id from customers where phone = $1", [customer.phone]);
+    let customerId;
+    if (existing.rows.length > 0) {
+      customerId = existing.rows[0].id;
+      await client.query(
+        "update customers set first_name=$1, last_name=$2, address=$3 where id=$4",
+        [customer.first_name, customer.last_name, customer.address, customerId]
+      );
+    } else {
+      const inserted = await client.query(
+        `insert into customers (first_name, last_name, phone, address)
+         values ($1,$2,$3,$4) returning id`,
+        [customer.first_name, customer.last_name, customer.phone, customer.address]
+      );
+      customerId = inserted.rows[0].id;
+    }
 
     const order = await client.query(
       `insert into orders (order_number, customer_id, notes, target_date)
@@ -93,7 +102,7 @@ router.post("/", asyncHandler(async (req, res) => {
       );
     }
 
-    res.status(201).json({ order_number, customer_number: customer.customer_number, bags: createdBags });
+    res.status(201).json({ order_number, bags: createdBags });
   } catch (e) {
     await client.query("rollback");
     res.status(500).json({ error: e.message });
@@ -105,7 +114,7 @@ router.post("/", asyncHandler(async (req, res) => {
 // צפייה בהזמנה — לבדיקה/שימוש פנימי
 router.get("/:order_number", asyncHandler(async (req, res) => {
   const o = await pool.query(
-    `select o.id, o.order_number, o.status, c.customer_number, c.first_name, c.last_name, c.phone, c.address
+    `select o.id, o.order_number, o.status, c.first_name, c.last_name, c.phone, c.address
      from orders o join customers c on c.id = o.customer_id
      where o.order_number = $1`,
     [req.params.order_number]

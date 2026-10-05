@@ -11,7 +11,7 @@ const DUPLICATE_WINDOW_MS = 60 * 1000;
 async function loadBag(code) {
   const { rows } = await pool.query(
     `select b.*, o.order_number, o.notes as order_notes,
-            c.customer_number, c.first_name, c.last_name, c.phone, c.address
+            c.first_name, c.last_name, c.phone, c.address
      from bags b
      join orders o on o.id = b.order_id
      join customers c on c.id = o.customer_id
@@ -32,7 +32,6 @@ function serializeBag(bag) {
     picked_up_at: bag.picked_up_at,
     returned_at: bag.returned_at,
     customer: {
-      customer_number: bag.customer_number,
       first_name: bag.first_name,
       last_name: bag.last_name,
       phone: bag.phone,
@@ -45,7 +44,7 @@ function serializeBag(bag) {
 // האתר רק מכין את הרשימה; הספק הוא זה שמאשר ומייבא אצלו, לא האתר שדוחף.
 router.get("/pending", asyncHandler(async (req, res) => {
   const { rows } = await pool.query(
-    `select b.*, o.order_number, c.customer_number, c.first_name, c.last_name, c.phone, c.address
+    `select b.*, o.order_number, c.first_name, c.last_name, c.phone, c.address
      from bags b
      join orders o on o.id = b.order_id
      join customers c on c.id = o.customer_id
@@ -58,7 +57,7 @@ router.get("/pending", asyncHandler(async (req, res) => {
 // כל השקיות שכרגע אצל הספק (נאספו ועוד לא הוחזרו) — למסך "מה אצלי"
 router.get("/with-me", asyncHandler(async (req, res) => {
   const { rows } = await pool.query(
-    `select b.*, o.order_number, c.customer_number, c.first_name, c.last_name, c.phone, c.address
+    `select b.*, o.order_number, c.first_name, c.last_name, c.phone, c.address
      from bags b
      join orders o on o.id = b.order_id
      join customers c on c.id = o.customer_id

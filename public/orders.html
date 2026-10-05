@@ -62,7 +62,6 @@
   </div>
 
   <form class="card" id="orderForm">
-    <div class="field"><label>מספר לקוח (קבוע — אותו לקוח תמיד אותו מספר)</label><input required id="customerNumber" placeholder="למשל C-1050"></div>
     <div class="grid2">
       <div class="field"><label>שם פרטי</label><input required id="firstName"></div>
       <div class="field"><label>שם משפחה</label><input required id="lastName"></div>
@@ -142,7 +141,6 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
 
   const body = {
     customer: {
-      customer_number: document.getElementById('customerNumber').value.trim(),
       first_name: document.getElementById('firstName').value.trim(),
       last_name: document.getElementById('lastName').value.trim(),
       phone: document.getElementById('phone').value.trim(),

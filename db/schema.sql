@@ -1,16 +1,18 @@
 -- סכמת judaica-stam. כל הפקודות בטוחות להרצה חוזרת (idempotent).
 create extension if not exists pgcrypto;
 
--- לקוחות — customer_number הוא המזהה היציב שספק הסת"ם (יודאיקה פלוס) מקשר אליו, לעולם לא ממוחזר.
+-- לקוחות — אין מספר לקוח שלנו. מזהים לקוח קיים לפי טלפון (routes/orders.js). ספק הסת"ם
+-- (יודאיקה פלוס) עושה התאמה אוטומטית אצלו לפי שם/טלפון; מה שלא מתאים נשאר אצלו לשיוך ידני.
 create table if not exists customers (
   id uuid primary key default gen_random_uuid(),
-  customer_number text not null unique,
   first_name text not null,
   last_name text not null,
   phone text not null,
   address text not null,
   created_at timestamptz not null default now()
 );
+-- טבלה ישנה (מהדיפלוי הראשון) כללה customer_number חובה+ייחודי — מוסר לגמרי, idempotent
+alter table customers drop column if exists customer_number;
 
 -- מספר הזמנה רץ, מונפק אוטומטית בשרת — אף אחד לא מזין אותו ידנית
 create sequence if not exists order_number_seq start 1001;
