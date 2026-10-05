@@ -1,11 +1,10 @@
 import express from "express";
 import { pool } from "../lib/db.js";
-import { requireApiKey } from "../lib/apiKey.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import { enqueuePrint } from "../lib/printQueue.js";
 
 export const router = express.Router();
-router.use(requireApiKey("internal"));
+// ללא אימות בכוונה — החלטת החנות: מי שיש לו גישה לאתר יכול ליצור הזמנות, בלי קוד API.
 
 const ITEM_TYPES = [
   "tefillin_pair",
@@ -33,11 +32,11 @@ const ITEM_TYPE_LABELS = {
 // למשל הזמנה 1234, שקית 2 -> "123402".
 const makeBagCode = (orderNumber, bagIndex) => `${orderNumber}${String(bagIndex).padStart(2, "0")}`;
 
-// יצירת הזמנה + שקיות. מספר הלקוח קבוע: אם קיים — נעשה שימוש בלקוח הקיים, אחרת נוצר חדש.
+// יצירת הזמנה + שקיות. מספר הזמנה מונפק אוטומטית (רץ). מספר הלקוח קבוע: אם קיים — נעשה שימוש בלקוח הקיים, אחרת נוצר חדש.
 router.post("/", asyncHandler(async (req, res) => {
-  const { order_number, customer, bags } = req.body || {};
-  if (!order_number || !customer?.customer_number || !Array.isArray(bags) || bags.length === 0) {
-    res.status(400).json({ error: "order_number, customer.customer_number ו-bags נדרשים" });
+  const { customer, bags } = req.body || {};
+  if (!customer?.customer_number || !Array.isArray(bags) || bags.length === 0) {
+    res.status(400).json({ error: "customer.customer_number ו-bags נדרשים" });
     return;
   }
   for (const b of bags) {
@@ -62,10 +61,11 @@ router.post("/", asyncHandler(async (req, res) => {
 
     const order = await client.query(
       `insert into orders (order_number, customer_id, notes, target_date)
-       values ($1,$2,$3,$4) returning id, order_number`,
-      [order_number, customerId, req.body.notes || null, req.body.target_date || null]
+       values (nextval('order_number_seq')::text,$1,$2,$3) returning id, order_number`,
+      [customerId, req.body.notes || null, req.body.target_date || null]
     );
     const orderId = order.rows[0].id;
+    const order_number = order.rows[0].order_number;
 
     const createdBags = [];
     for (let i = 0; i < bags.length; i++) {
@@ -96,11 +96,7 @@ router.post("/", asyncHandler(async (req, res) => {
     res.status(201).json({ order_number, customer_number: customer.customer_number, bags: createdBags });
   } catch (e) {
     await client.query("rollback");
-    if (e.code === "23505") {
-      res.status(409).json({ error: "מספר הזמנה כבר קיים" });
-    } else {
-      res.status(500).json({ error: e.message });
-    }
+    res.status(500).json({ error: e.message });
   } finally {
     client.release();
   }

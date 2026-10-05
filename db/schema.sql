@@ -12,6 +12,9 @@ create table if not exists customers (
   created_at timestamptz not null default now()
 );
 
+-- מספר הזמנה רץ, מונפק אוטומטית בשרת — אף אחד לא מזין אותו ידנית
+create sequence if not exists order_number_seq start 1001;
+
 create table if not exists orders (
   id uuid primary key default gen_random_uuid(),
   order_number text not null unique,

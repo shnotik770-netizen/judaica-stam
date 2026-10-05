@@ -61,19 +61,8 @@
     <div class="sub">כל שקית מודפסת מיד כמדבקה נפרדת עם ברקוד — אפשר להוסיף כמה שקיות שרוצים באותה הזמנה.</div>
   </div>
 
-  <div class="card" id="keyCard">
-    <div class="key-bar">
-      <span>מפתח API פנימי:</span>
-      <input type="password" id="apiKey" placeholder="הדבק כאן פעם אחת">
-      <button class="btn-ghost" id="saveKey">שמור</button>
-    </div>
-  </div>
-
   <form class="card" id="orderForm">
-    <div class="grid2">
-      <div class="field"><label>מספר הזמנה</label><input required id="orderNumber" placeholder="למשל 1050"></div>
-      <div class="field"><label>מספר לקוח (קבוע)</label><input required id="customerNumber" placeholder="למשל C-1050"></div>
-    </div>
+    <div class="field"><label>מספר לקוח (קבוע — אותו לקוח תמיד אותו מספר)</label><input required id="customerNumber" placeholder="למשל C-1050"></div>
     <div class="grid2">
       <div class="field"><label>שם פרטי</label><input required id="firstName"></div>
       <div class="field"><label>שם משפחה</label><input required id="lastName"></div>
@@ -117,13 +106,6 @@
 
 <script>
 const API_BASE = "";
-const keyInput = document.getElementById('apiKey');
-const savedKey = localStorage.getItem('jstam_internal_key');
-if (savedKey) keyInput.value = savedKey;
-document.getElementById('saveKey').onclick = () => {
-  localStorage.setItem('jstam_internal_key', keyInput.value.trim());
-  alert('נשמר');
-};
 
 const bagsEl = document.getElementById('bags');
 const tpl = document.getElementById('bagTpl');
@@ -148,10 +130,8 @@ addBag();
 
 document.getElementById('orderForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const key = localStorage.getItem('jstam_internal_key');
   const msg = document.getElementById('msg');
   msg.className = 'msg';
-  if (!key) { msg.className = 'msg err'; msg.textContent = 'קודם הדבק ושמור מפתח API.'; return; }
 
   const bags = [...bagsEl.querySelectorAll('.bag')].map(b => ({
     item_type: b.querySelector('.itemType').value,
@@ -161,7 +141,6 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
   if (bags.length === 0) { msg.className = 'msg err'; msg.textContent = 'צריך לפחות שקית אחת.'; return; }
 
   const body = {
-    order_number: document.getElementById('orderNumber').value.trim(),
     customer: {
       customer_number: document.getElementById('customerNumber').value.trim(),
       first_name: document.getElementById('firstName').value.trim(),
@@ -175,13 +154,13 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
   try {
     const res = await fetch(API_BASE + '/api/orders', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'שגיאה');
     msg.className = 'msg ok';
-    msg.innerHTML = 'ההזמנה נוצרה, ' + data.bags.length + ' מדבקות נשלחו להדפסה.<div class="codes">' +
+    msg.innerHTML = 'הזמנה מספר ' + data.order_number + ' נוצרה, ' + data.bags.length + ' מדבקות נשלחו להדפסה.<div class="codes">' +
       data.bags.map(b => b.bag_code).join(' · ') + '</div>';
     e.target.reset();
     bagsEl.innerHTML = ''; bagCount = 0; addBag();

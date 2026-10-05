@@ -41,6 +41,20 @@ function serializeBag(bag) {
   };
 }
 
+// כל השקיות שממתינות לאיסוף — הרשימה המלאה שהתוכנה של הספק מושכת מראש (לא per-code).
+// האתר רק מכין את הרשימה; הספק הוא זה שמאשר ומייבא אצלו, לא האתר שדוחף.
+router.get("/pending", asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    `select b.*, o.order_number, c.customer_number, c.first_name, c.last_name, c.phone, c.address
+     from bags b
+     join orders o on o.id = b.order_id
+     join customers c on c.id = o.customer_id
+     where b.status = 'waiting_pickup'
+     order by o.created_at asc`
+  );
+  res.json({ bags: rows.map(serializeBag) });
+}));
+
 // כל השקיות שכרגע אצל הספק (נאספו ועוד לא הוחזרו) — למסך "מה אצלי"
 router.get("/with-me", asyncHandler(async (req, res) => {
   const { rows } = await pool.query(
