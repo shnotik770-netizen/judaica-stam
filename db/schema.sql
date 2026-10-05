@@ -42,7 +42,8 @@ create table if not exists bags (
 create index if not exists idx_bags_order on bags(order_id);
 create index if not exists idx_bags_status on bags(status);
 
--- מפתחות API לספקים חיצוניים (כרגע: יודאיקה פלוס). נשמר רק hash, לא הערך עצמו.
+-- מפתחות API. נשמר רק hash, לא הערך עצמו.
+-- scope: 'internal' (צוות החנות — /api/orders) | 'supplier' (ספק חיצוני — /api/supplier/*)
 create table if not exists api_keys (
   id uuid primary key default gen_random_uuid(),
   label text not null,
@@ -51,3 +52,10 @@ create table if not exists api_keys (
   created_at timestamptz not null default now(),
   last_used_at timestamptz
 );
+-- טבלה ישנה (מהדיפלוי הראשון) לא כללה scope — מוסיפים בדיעבד, idempotent
+alter table api_keys add column if not exists scope text not null default 'internal';
+alter table api_keys drop constraint if exists api_keys_scope_check;
+alter table api_keys add constraint api_keys_scope_check check (scope in ('internal','supplier'));
+
+-- מפתח קיים שכבר הונפק ל"יודאיקה פלוס" לפני שהיה scope — מסמן אותו בדיעבד כ-supplier
+update api_keys set scope = 'supplier' where label = 'יודאיקה פלוס' and scope = 'internal';

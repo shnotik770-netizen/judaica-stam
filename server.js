@@ -1,14 +1,19 @@
 import express from "express";
+import path from "path";
+import { fileURLToPath } from "url";
 import { sendSms, getIncomingSms, getSmsOutLog } from "./lib/call2all.js";
 import { migrate } from "./db/migrate.js";
 import { router as supplierRouter } from "./routes/supplier.js";
 import { router as ordersRouter } from "./routes/orders.js";
 import { router as labelsRouter } from "./routes/labels.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/", (req, res) => {
   res.json({ status: "ok", service: "judaica-stam" });

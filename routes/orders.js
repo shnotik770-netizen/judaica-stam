@@ -2,9 +2,10 @@ import express from "express";
 import { pool } from "../lib/db.js";
 import { requireApiKey } from "../lib/apiKey.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
+import { enqueuePrint } from "../lib/printQueue.js";
 
 export const router = express.Router();
-router.use(requireApiKey);
+router.use(requireApiKey("internal"));
 
 const ITEM_TYPES = [
   "tefillin_pair",
@@ -16,6 +17,21 @@ const ITEM_TYPES = [
   "nach",
   "other",
 ];
+
+const ITEM_TYPE_LABELS = {
+  tefillin_pair: "תפילין זוג",
+  tefillin_head: "תפילין ראש",
+  tefillin_hand: "תפילין יד",
+  mezuzah: "מזוזה",
+  megillah: "מגילה",
+  sefer_torah: "ספר תורה",
+  nach: "נ\"ך",
+  other: "אחר",
+};
+
+// קוד שקית מספרי בלבד (כמו ברקוד של חנות) — מספר הזמנה + 2 ספרות רצף שקית, בלי מפריד.
+// למשל הזמנה 1234, שקית 2 -> "123402".
+const makeBagCode = (orderNumber, bagIndex) => `${orderNumber}${String(bagIndex).padStart(2, "0")}`;
 
 // יצירת הזמנה + שקיות. מספר הלקוח קבוע: אם קיים — נעשה שימוש בלקוח הקיים, אחרת נוצר חדש.
 router.post("/", asyncHandler(async (req, res) => {
@@ -54,7 +70,7 @@ router.post("/", asyncHandler(async (req, res) => {
     const createdBags = [];
     for (let i = 0; i < bags.length; i++) {
       const b = bags[i];
-      const bagCode = `${order_number}-${i + 1}`;
+      const bagCode = makeBagCode(order_number, i + 1);
       const r = await client.query(
         `insert into bags (order_id, bag_code, item_type, item_type_note, quantity)
          values ($1,$2,$3,$4,$5) returning bag_code, item_type, quantity`,
@@ -64,6 +80,19 @@ router.post("/", asyncHandler(async (req, res) => {
     }
 
     await client.query("commit");
+
+    // הדפסת מדבקה לכל שקית ברגע יצירת ההזמנה — Code128, אותו קוד מספרי שהוחזר בכל שקית
+    for (const b of createdBags) {
+      const text = [
+        `הזמנה מספר ${order_number}`,
+        `${customer.first_name} ${customer.last_name}`,
+        `${ITEM_TYPE_LABELS[b.item_type] || b.item_type}${b.quantity > 1 ? ` ×${b.quantity}` : ""}`,
+      ].join("\n");
+      enqueuePrint({ text, barcode: b.bag_code, copies: 1 }).catch((e) =>
+        console.error("enqueuePrint failed", b.bag_code, e.message)
+      );
+    }
+
     res.status(201).json({ order_number, customer_number: customer.customer_number, bags: createdBags });
   } catch (e) {
     await client.query("rollback");

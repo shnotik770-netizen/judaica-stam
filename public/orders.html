@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>הזמנה חדשה — חנות יודאייקה</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&display=swap">
+<style>
+  :root{
+    --bg:#f5f4f0; --surface:#ffffff; --surface-2:#f0eee7;
+    --text:#211f1a; --text-muted:#6b6558; --border:#e2ddd0;
+    --accent:#1e3a5f; --accent-2:#163049; --accent-soft:#e8edf3;
+    --danger:#b3432f; --danger-soft:#fbeae6; --ok:#2f6b35; --ok-soft:#e9f3ea;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#15171b; --surface:#1d2025; --surface-2:#242830;
+      --text:#eae7df; --text-muted:#9b968a; --border:#33363d;
+      --accent:#7fa8d9; --accent-2:#9cc0ee; --accent-soft:#1f2c3b;
+      --danger:#e08a73; --danger-soft:#3a211c; --ok:#7fce89; --ok-soft:#17291b;
+    }
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'Heebo',-apple-system,'Segoe UI',sans-serif;padding:20px 16px 60px;}
+  .wrap{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:18px;}
+  h1{font-size:22px;margin:0;}
+  .sub{color:var(--text-muted);font-size:13.5px;margin-top:-10px;}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:14px;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  @media (max-width:480px){.grid2{grid-template-columns:1fr;}}
+  label{font-size:12.5px;color:var(--text-muted);display:block;margin-bottom:4px;}
+  input,select,textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-family:inherit;font-size:14.5px;}
+  input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:1px;}
+  .field{display:flex;flex-direction:column;}
+  .bag{border:1px solid var(--border);border-radius:11px;padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--surface-2);}
+  .bag-head{display:flex;justify-content:space-between;align-items:center;}
+  .bag-head b{font-size:13.5px;}
+  .bag-grid{display:grid;grid-template-columns:2fr 1fr auto;gap:10px;align-items:end;}
+  @media (max-width:480px){.bag-grid{grid-template-columns:1fr;}}
+  button{cursor:pointer;border:none;border-radius:9px;font-family:inherit;font-weight:600;font-size:14px;padding:10px 16px;}
+  .btn-primary{background:var(--accent);color:#fff;}
+  .btn-primary:hover{background:var(--accent-2);}
+  .btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text);}
+  .btn-danger{background:transparent;color:var(--danger);border:1px solid var(--danger);padding:6px 10px;font-size:12.5px;}
+  .btn-add{background:var(--accent-soft);color:var(--accent);width:100%;}
+  .row-end{display:flex;justify-content:flex-end;gap:10px;}
+  .msg{border-radius:11px;padding:12px 14px;font-size:14px;line-height:1.6;display:none;}
+  .msg.ok{display:block;background:var(--ok-soft);color:var(--ok);}
+  .msg.err{display:block;background:var(--danger-soft);color:var(--danger);}
+  .key-bar{display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--text-muted);}
+  .key-bar input{flex:1;font-size:12.5px;padding:6px 10px;}
+  .key-bar button{padding:6px 10px;font-size:12px;}
+  .codes{font-family:ui-monospace,monospace;font-size:13px;background:var(--surface-2);border-radius:8px;padding:8px 10px;margin-top:6px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div>
+    <h1>הזמנה חדשה</h1>
+    <div class="sub">כל שקית מודפסת מיד כמדבקה נפרדת עם ברקוד — אפשר להוסיף כמה שקיות שרוצים באותה הזמנה.</div>
+  </div>
+
+  <div class="card" id="keyCard">
+    <div class="key-bar">
+      <span>מפתח API פנימי:</span>
+      <input type="password" id="apiKey" placeholder="הדבק כאן פעם אחת">
+      <button class="btn-ghost" id="saveKey">שמור</button>
+    </div>
+  </div>
+
+  <form class="card" id="orderForm">
+    <div class="grid2">
+      <div class="field"><label>מספר הזמנה</label><input required id="orderNumber" placeholder="למשל 1050"></div>
+      <div class="field"><label>מספר לקוח (קבוע)</label><input required id="customerNumber" placeholder="למשל C-1050"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>שם פרטי</label><input required id="firstName"></div>
+      <div class="field"><label>שם משפחה</label><input required id="lastName"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>טלפון</label><input required id="phone"></div>
+      <div class="field"><label>כתובת</label><input required id="address"></div>
+    </div>
+
+    <div id="bags"></div>
+    <button type="button" class="btn-add" id="addBag">+ הוסף שקית</button>
+
+    <div class="row-end">
+      <button type="submit" class="btn-primary">צור הזמנה והדפס מדבקות</button>
+    </div>
+    <div class="msg" id="msg"></div>
+  </form>
+</div>
+
+<template id="bagTpl">
+  <div class="bag">
+    <div class="bag-head"><b></b><button type="button" class="btn-danger remove">הסר</button></div>
+    <div class="bag-grid">
+      <div class="field"><label>סוג פריט</label>
+        <select class="itemType">
+          <option value="tefillin_pair">תפילין זוג</option>
+          <option value="tefillin_head">תפילין ראש</option>
+          <option value="tefillin_hand">תפילין יד</option>
+          <option value="mezuzah">מזוזה</option>
+          <option value="megillah">מגילה</option>
+          <option value="sefer_torah">ספר תורה</option>
+          <option value="nach">נ"ך</option>
+          <option value="other">אחר</option>
+        </select>
+      </div>
+      <div class="field"><label>כמות</label><input type="number" class="qty" value="1" min="1"></div>
+      <div class="field note-field" style="display:none"><label>פירוט</label><input class="note" placeholder="כש'אחר'"></div>
+    </div>
+  </div>
+</template>
+
+<script>
+const API_BASE = "";
+const keyInput = document.getElementById('apiKey');
+const savedKey = localStorage.getItem('jstam_internal_key');
+if (savedKey) keyInput.value = savedKey;
+document.getElementById('saveKey').onclick = () => {
+  localStorage.setItem('jstam_internal_key', keyInput.value.trim());
+  alert('נשמר');
+};
+
+const bagsEl = document.getElementById('bags');
+const tpl = document.getElementById('bagTpl');
+let bagCount = 0;
+
+function addBag(){
+  bagCount++;
+  const node = tpl.content.cloneNode(true);
+  node.querySelector('.bag-head b').textContent = 'שקית ' + bagCount;
+  const select = node.querySelector('.itemType');
+  const noteField = node.querySelector('.note-field');
+  select.addEventListener('change', () => {
+    noteField.style.display = select.value === 'other' ? 'flex' : 'none';
+  });
+  node.querySelector('.remove').addEventListener('click', (e) => {
+    e.target.closest('.bag').remove();
+  });
+  bagsEl.appendChild(node);
+}
+document.getElementById('addBag').onclick = addBag;
+addBag();
+
+document.getElementById('orderForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const key = localStorage.getItem('jstam_internal_key');
+  const msg = document.getElementById('msg');
+  msg.className = 'msg';
+  if (!key) { msg.className = 'msg err'; msg.textContent = 'קודם הדבק ושמור מפתח API.'; return; }
+
+  const bags = [...bagsEl.querySelectorAll('.bag')].map(b => ({
+    item_type: b.querySelector('.itemType').value,
+    item_type_note: b.querySelector('.note')?.value || null,
+    quantity: +b.querySelector('.qty').value || 1,
+  }));
+  if (bags.length === 0) { msg.className = 'msg err'; msg.textContent = 'צריך לפחות שקית אחת.'; return; }
+
+  const body = {
+    order_number: document.getElementById('orderNumber').value.trim(),
+    customer: {
+      customer_number: document.getElementById('customerNumber').value.trim(),
+      first_name: document.getElementById('firstName').value.trim(),
+      last_name: document.getElementById('lastName').value.trim(),
+      phone: document.getElementById('phone').value.trim(),
+      address: document.getElementById('address').value.trim(),
+    },
+    bags,
+  };
+
+  try {
+    const res = await fetch(API_BASE + '/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה');
+    msg.className = 'msg ok';
+    msg.innerHTML = 'ההזמנה נוצרה, ' + data.bags.length + ' מדבקות נשלחו להדפסה.<div class="codes">' +
+      data.bags.map(b => b.bag_code).join(' · ') + '</div>';
+    e.target.reset();
+    bagsEl.innerHTML = ''; bagCount = 0; addBag();
+  } catch (err) {
+    msg.className = 'msg err';
+    msg.textContent = err.message;
+  }
+});
+</script>
+</body>
+</html>

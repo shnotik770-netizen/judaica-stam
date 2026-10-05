@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>יודאיקה פלוס — איסוף והחזרה</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&display=swap">
+<style>
+  :root{
+    --bg:#f5f4f0; --surface:#ffffff; --surface-2:#f0eee7;
+    --text:#211f1a; --text-muted:#6b6558; --border:#e2ddd0;
+    --accent:#1e3a5f; --accent-2:#163049; --accent-soft:#e8edf3;
+    --danger:#b3432f; --danger-soft:#fbeae6; --ok:#2f6b35; --ok-soft:#e9f3ea;
+    --warn:#8a5a1f; --warn-soft:#fbf0e3;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#15171b; --surface:#1d2025; --surface-2:#242830;
+      --text:#eae7df; --text-muted:#9b968a; --border:#33363d;
+      --accent:#7fa8d9; --accent-2:#9cc0ee; --accent-soft:#1f2c3b;
+      --danger:#e08a73; --danger-soft:#3a211c; --ok:#7fce89; --ok-soft:#17291b;
+      --warn:#e3ab5c; --warn-soft:#2e2412;
+    }
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'Heebo',-apple-system,'Segoe UI',sans-serif;padding:20px 16px 60px;}
+  .wrap{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:16px;}
+  h1{font-size:22px;margin:0;}
+  .tabs{display:flex;gap:8px;}
+  .tab{flex:1;text-align:center;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--surface);cursor:pointer;font-weight:600;font-size:14px;}
+  .tab.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:14px;}
+  .key-bar{display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--text-muted);}
+  .key-bar input{flex:1;font-size:12.5px;padding:6px 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);}
+  .key-bar button{padding:6px 10px;font-size:12px;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:7px;cursor:pointer;}
+  .scan-input{width:100%;padding:16px;font-size:20px;border:2px solid var(--accent);border-radius:12px;text-align:center;font-family:ui-monospace,monospace;background:var(--surface);color:var(--text);}
+  .summary{display:flex;gap:10px;}
+  .stat{flex:1;text-align:center;background:var(--surface-2);border-radius:10px;padding:10px;}
+  .stat b{display:block;font-size:20px;}
+  .stat span{font-size:11px;color:var(--text-muted);}
+  .log{display:flex;flex-direction:column-reverse;gap:8px;max-height:50vh;overflow-y:auto;}
+  .entry{border-radius:11px;padding:10px 13px;font-size:13.5px;border:1px solid;}
+  .entry.ok{background:var(--ok-soft);color:var(--ok);border-color:var(--ok);}
+  .entry.warn{background:var(--warn-soft);color:var(--warn);border-color:var(--warn);}
+  .entry.err{background:var(--danger-soft);color:var(--danger);border-color:var(--danger);}
+  .entry b{display:block;font-size:14.5px;}
+  .entry .d{opacity:.85;font-size:12.5px;margin-top:2px;}
+  button.reload{background:var(--accent-soft);color:var(--accent);border:none;border-radius:9px;padding:8px 14px;font-weight:600;cursor:pointer;font-size:13px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:right;padding:7px 6px;border-bottom:1px solid var(--border);}
+  th{color:var(--text-muted);font-weight:600;font-size:12px;}
+  .hidden{display:none;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>חב"ד יודאייקה — איסוף והחזרה</h1>
+
+  <div class="card">
+    <div class="key-bar">
+      <span>מפתח:</span>
+      <input type="password" id="apiKey" placeholder="הדבק כאן פעם אחת">
+      <button id="saveKey">שמור</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="scan">סריקה</div>
+    <div class="tab" data-tab="mine">מה אצלי</div>
+  </div>
+
+  <div id="scanPanel" class="card">
+    <input id="scanInput" class="scan-input" placeholder="סרוק ברקוד…" autofocus>
+    <div class="summary">
+      <div class="stat"><b id="sCount">0</b><span>נסרקו</span></div>
+      <div class="stat"><b id="sOk">0</b><span>תקינים</span></div>
+      <div class="stat"><b id="sWarn">0</b><span>דורש בירור</span></div>
+    </div>
+    <div class="log" id="log"></div>
+  </div>
+
+  <div id="minePanel" class="card hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-size:13px;color:var(--text-muted);" id="mineCount"></span>
+      <button class="reload" id="reload">רענן</button>
+    </div>
+    <table>
+      <thead><tr><th>הזמנה</th><th>לקוח</th><th>פריט</th><th>אצלי מאז</th></tr></thead>
+      <tbody id="mineBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const keyInput = document.getElementById('apiKey');
+const saved = localStorage.getItem('jstam_supplier_key');
+if (saved) keyInput.value = saved;
+document.getElementById('saveKey').onclick = () => {
+  localStorage.setItem('jstam_supplier_key', keyInput.value.trim());
+  alert('נשמר');
+};
+function getKey(){ return localStorage.getItem('jstam_supplier_key'); }
+
+const ITEM_LABELS = {
+  tefillin_pair:'תפילין זוג', tefillin_head:'תפילין ראש', tefillin_hand:'תפילין יד',
+  mezuzah:'מזוזה', megillah:'מגילה', sefer_torah:'ספר תורה', nach:'נ"ך', other:'אחר',
+};
+
+// --- tabs ---
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  const isScan = t.dataset.tab === 'scan';
+  document.getElementById('scanPanel').classList.toggle('hidden', !isScan);
+  document.getElementById('minePanel').classList.toggle('hidden', isScan);
+  if (!isScan) loadMine();
+  else document.getElementById('scanInput').focus();
+}));
+
+// --- beep ---
+function beep(freq, dur){
+  try{
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = freq;
+    osc.connect(gain); gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    osc.start();
+    osc.stop(ctx.currentTime + dur);
+  }catch(e){}
+}
+
+// --- scan ---
+let counts = { total:0, ok:0, warn:0 };
+function updateSummary(){
+  document.getElementById('sCount').textContent = counts.total;
+  document.getElementById('sOk').textContent = counts.ok;
+  document.getElementById('sWarn').textContent = counts.warn;
+}
+function addLog(kind, title, detail){
+  const el = document.createElement('div');
+  el.className = 'entry ' + kind;
+  el.innerHTML = '<b></b><div class="d"></div>';
+  el.querySelector('b').textContent = title;
+  el.querySelector('.d').textContent = detail;
+  document.getElementById('log').appendChild(el);
+}
+
+const scanInput = document.getElementById('scanInput');
+scanInput.addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter') return;
+  const code = scanInput.value.trim();
+  scanInput.value = '';
+  if (!code) return;
+  const key = getKey();
+  if (!key) { addLog('err', 'אין מפתח', 'הדבק ושמור מפתח למעלה'); return; }
+
+  counts.total++;
+  try {
+    const res = await fetch('/api/supplier/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+      body: JSON.stringify({ bag_code: code }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      counts.warn++;
+      addLog('warn', code, data.error || 'שגיאה');
+      beep(220, 0.3);
+    } else {
+      const who = data.bag.customer.first_name + ' ' + data.bag.customer.last_name;
+      const item = (ITEM_LABELS[data.bag.item_type] || data.bag.item_type) + (data.bag.quantity > 1 ? ' ×' + data.bag.quantity : '');
+      if (data.action === 'picked_up') {
+        counts.ok++; addLog('ok', who + ' — נאסף', item + ' · הזמנה #' + data.bag.order_number); beep(880, 0.15);
+      } else if (data.action === 'returned') {
+        counts.ok++; addLog('ok', who + ' — הוחזר', item + ' · הזמנה #' + data.bag.order_number); beep(880, 0.15); beep(660, 0.15);
+      } else {
+        counts.warn++; addLog('warn', who + ' — סריקה כפולה', 'אותה שקית נסרקה הרגע, לא נרשם שוב');
+      }
+    }
+  } catch (err) {
+    counts.warn++;
+    addLog('err', code, 'שגיאת רשת: ' + err.message);
+  }
+  updateSummary();
+  scanInput.focus();
+});
+document.body.addEventListener('click', () => { if (!document.getElementById('scanPanel').classList.contains('hidden')) scanInput.focus(); });
+
+// --- mine ---
+async function loadMine(){
+  const key = getKey();
+  const body = document.getElementById('mineBody');
+  const countEl = document.getElementById('mineCount');
+  if (!key) { countEl.textContent = 'הדבק מפתח קודם'; return; }
+  countEl.textContent = 'טוען…';
+  try {
+    const res = await fetch('/api/supplier/with-me', { headers: { Authorization: 'Bearer ' + key } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    countEl.textContent = data.bags.length + ' שקיות אצלי כרגע';
+    body.innerHTML = data.bags.map(b => {
+      const who = b.customer.first_name + ' ' + b.customer.last_name;
+      const item = (ITEM_LABELS[b.item_type] || b.item_type) + (b.quantity > 1 ? ' ×' + b.quantity : '');
+      const since = b.picked_up_at ? new Date(b.picked_up_at).toLocaleDateString('he-IL') : '—';
+      return '<tr><td>#' + b.order_number + '</td><td>' + who + '</td><td>' + item + '</td><td>' + since + '</td></tr>';
+    }).join('') || '<tr><td colspan="4" style="color:var(--text-muted)">אין כרגע שקיות</td></tr>';
+  } catch (err) {
+    countEl.textContent = 'שגיאה: ' + err.message;
+  }
+}
+document.getElementById('reload').onclick = loadMine;
+</script>
+</body>
+</html>

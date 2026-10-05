@@ -4,7 +4,7 @@ import { requireApiKey } from "../lib/apiKey.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 
 export const router = express.Router();
-router.use(requireApiKey);
+router.use(requireApiKey("supplier"));
 
 const DUPLICATE_WINDOW_MS = 60 * 1000;
 
@@ -29,6 +29,8 @@ function serializeBag(bag) {
     item_type: bag.item_type,
     item_type_note: bag.item_type_note,
     quantity: bag.quantity,
+    picked_up_at: bag.picked_up_at,
+    returned_at: bag.returned_at,
     customer: {
       customer_number: bag.customer_number,
       first_name: bag.first_name,
@@ -38,6 +40,19 @@ function serializeBag(bag) {
     },
   };
 }
+
+// כל השקיות שכרגע אצל הספק (נאספו ועוד לא הוחזרו) — למסך "מה אצלי"
+router.get("/with-me", asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    `select b.*, o.order_number, c.customer_number, c.first_name, c.last_name, c.phone, c.address
+     from bags b
+     join orders o on o.id = b.order_id
+     join customers c on c.id = o.customer_id
+     where b.status = 'with_supplier'
+     order by b.picked_up_at asc`
+  );
+  res.json({ bags: rows.map(serializeBag) });
+}));
 
 // פרטי שקית — לפי קוד ברקוד
 router.get("/bag/:code", asyncHandler(async (req, res) => {
