@@ -85,6 +85,17 @@ create table if not exists activity_log (
 );
 create index if not exists idx_activity_log_created on activity_log(created_at desc);
 
+-- הגדרות כלליות (key/value) — כרגע רק תבנית הודעת ה-SMS ל"דיווח ללקוח", ניתנת לעריכה במסך "ניהול"
+-- בלי לדרוש דיפלוי קוד. {items} בתבנית מוחלף בסיכום הפריטים (ראו routes/orders.js).
+create table if not exists settings (
+  key text primary key,
+  value text not null,
+  updated_at timestamptz not null default now()
+);
+insert into settings (key, value) values
+  ('sms_notify_template', '{items} חזרו מבדיקת סת"ם ומחכים לך ביודאיקה פלוס חב"ד.')
+on conflict (key) do nothing;
+
 -- מפתחות API. נשמר רק hash, לא הערך עצמו.
 -- scope: 'internal' (צוות החנות — /api/orders) | 'supplier' (ספק חיצוני — /api/supplier/*)
 create table if not exists api_keys (

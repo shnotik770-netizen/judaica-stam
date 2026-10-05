@@ -174,7 +174,8 @@
     <div id="quickActionChooser" class="hidden">
       <div class="sub" style="margin:0 0 8px;">מה מטרת הפעולה המהירה? (לחיצה על שורה ברשימה תבצע אותה מיד)</div>
       <div class="purpose-grid">
-        <button type="button" class="purpose-btn" data-purpose="notify">📨 דיווח ללקוח (SMS)</button>
+        <button type="button" class="purpose-btn" data-purpose="notify_manual">✅ לקוח עודכן</button>
+        <button type="button" class="purpose-btn" data-purpose="notify_sms">📨 דיווח ללקוח (SMS)</button>
         <button type="button" class="purpose-btn" data-purpose="collect">📦 מסירה ללקוח</button>
       </div>
     </div>
@@ -262,6 +263,16 @@
         <button type="button" class="btn-primary" id="fixApply">עדכן</button>
       </div>
       <div class="msg" id="fixMsg"></div>
+    </div>
+
+    <div class="card">
+      <b>תבנית הודעת SMS ל"דיווח ללקוח"</b>
+      <div class="sub" style="margin:0;"><code>{items}</code> יוחלף אוטומטית בסיכום הפריטים (למשל "2 מזוזות, תפילין זוג").</div>
+      <textarea id="smsTemplate" rows="3"></textarea>
+      <div class="row-end">
+        <button type="button" class="btn-primary" id="smsTemplateSave">שמור</button>
+      </div>
+      <div class="msg" id="smsTemplateMsg"></div>
     </div>
 
     <div class="card">
@@ -390,7 +401,7 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   document.getElementById('adminPanel').classList.toggle('hidden', tab !== 'admin');
   if (tab !== 'list') cancelQuickAction();
   if (tab === 'list') loadList();
-  if (tab === 'admin') loadActivityLog();
+  if (tab === 'admin') { loadActivityLog(); loadSettings(); }
 }));
 
 const ITEM_LABELS = {
@@ -422,7 +433,7 @@ async function loadList(){
   if (q) params.set('q', q);
   if (quickAction) {
     // במצב פעולה מהירה מציגים רק שקיות שמתאימות לפעולה הנבחרת — לא לפי המסנן הידני
-    params.set('status', quickAction === 'notify' ? 'returned_at_store' : 'not_collected');
+    params.set('status', quickAction === 'collect' ? 'not_collected' : 'returned_at_store');
   } else {
     const status = document.getElementById('filterStatus').value;
     if (status) params.set('status', status);
@@ -627,7 +638,13 @@ function addActionLog(kind, title, detail){
   document.getElementById('actionLog').appendChild(el);
 }
 
-let quickAction = null; // 'notify' | 'collect' | null — תמיד נבחר מראש ע"י הצוות, לא מנוחש
+let quickAction = null; // 'notify_manual' | 'notify_sms' | 'collect' | null — תמיד נבחר מראש ע"י הצוות, לא מנוחש
+
+const QUICK_ACTION_LABELS = {
+  notify_manual: '✅ מצב פעיל: לקוח עודכן',
+  notify_sms: '📨 מצב פעיל: דיווח ללקוח (SMS)',
+  collect: '📦 מצב פעיל: מסירה ללקוח',
+};
 
 document.getElementById('quickActionToggle').addEventListener('click', () => {
   document.getElementById('quickActionChooser').classList.toggle('hidden');
@@ -637,8 +654,7 @@ document.querySelectorAll('.purpose-btn').forEach(b => b.addEventListener('click
   quickAction = b.dataset.purpose;
   document.getElementById('quickActionChooser').classList.add('hidden');
   document.getElementById('quickActionActive').classList.remove('hidden');
-  document.getElementById('quickActionLabel').textContent = quickAction === 'notify'
-    ? '📨 מצב פעיל: דיווח ללקוח' : '📦 מצב פעיל: מסירה ללקוח';
+  document.getElementById('quickActionLabel').textContent = QUICK_ACTION_LABELS[quickAction];
   document.getElementById('actionLog').innerHTML = '';
   document.getElementById('filterStatus').disabled = true;
   loadList();
@@ -678,9 +694,15 @@ async function applyQuickAction(codes){
       (data.results || []).forEach(r => {
         if (!r.ok) { addActionLog('warn', r.bag_code, r.error || 'שגיאה'); return; }
         const who = r.customer.first_name + ' ' + r.customer.last_name;
-        if (r.action === 'notified') addActionLog('ok', who + ' — עודכן ללקוח', 'נשלחה הודעה · הזמנה #' + r.order_number);
-        else if (r.action === 'collected') addActionLog('ok', who + ' — נאסף ע"י לקוח', 'הזמנה #' + r.order_number);
-        else addActionLog('warn', who + ' — כבר סומן', 'לא נרשם שוב');
+        if (r.action === 'notified') {
+          const extra = r.grouped_bag_codes && r.grouped_bag_codes.length > 1
+            ? ' · קובצו ' + r.grouped_bag_codes.length + ' שקיות של אותו טלפון' : '';
+          addActionLog('ok', who + ' — עודכן ללקוח', 'הזמנה #' + r.order_number + extra);
+        } else if (r.action === 'collected') {
+          addActionLog('ok', who + ' — נאסף ע"י לקוח', 'הזמנה #' + r.order_number);
+        } else {
+          addActionLog('warn', who + ' — כבר דווח', r.message || 'לא נרשם שוב');
+        }
       });
       beep(880, 0.15);
     }
@@ -797,12 +819,40 @@ document.getElementById('fixApply').addEventListener('click', async () => {
   }
 });
 
+async function loadSettings(){
+  try {
+    const res = await fetch(API_BASE + '/api/orders/settings');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה');
+    document.getElementById('smsTemplate').value = data.sms_notify_template || '';
+  } catch (err) { /* לא קריטי, הטקסט פשוט יישאר ריק */ }
+}
+document.getElementById('smsTemplateSave').addEventListener('click', async () => {
+  const msg = document.getElementById('smsTemplateMsg');
+  msg.className = 'msg';
+  try {
+    const res = await fetch(API_BASE + '/api/orders/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sms_notify_template: document.getElementById('smsTemplate').value }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה');
+    msg.className = 'msg ok';
+    msg.textContent = 'נשמר.';
+    loadActivityLog();
+  } catch (err) {
+    msg.className = 'msg err';
+    msg.textContent = err.message;
+  }
+});
+
 const LOG_ACTION_LABELS = {
   order_created: 'הזמנה נוצרה', order_edited: 'הזמנה נערכה', order_deleted: 'הזמנה נמחקה',
   bag_added: 'שקית נוספה', bag_deleted: 'שקית נמחקה',
   picked_up: 'נאסף ע"י הספק', returned: 'הוחזר מהספק',
   customer_notified: 'עודכן ללקוח', customer_collected: 'נאסף ע"י לקוח',
-  customer_linked: 'דווח מספר לקוח', manual_fix: 'תיקון ידני',
+  customer_linked: 'דווח מספר לקוח', manual_fix: 'תיקון ידני', settings_changed: 'הגדרה עודכנה',
 };
 async function loadActivityLog(){
   const listEl = document.getElementById('activityLogList');

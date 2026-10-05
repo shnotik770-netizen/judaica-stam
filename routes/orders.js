@@ -5,6 +5,7 @@ import { enqueuePrint } from "../lib/printQueue.js";
 import { toHebrewDate } from "../lib/hebrewDate.js";
 import { sendSms } from "../lib/call2all.js";
 import { logActivity } from "../lib/activityLog.js";
+import { getSetting, setSetting } from "../lib/settings.js";
 
 export const router = express.Router();
 // ללא אימות בכוונה — החלטת החנות: מי שיש לו גישה לאתר יכול ליצור הזמנות, בלי קוד API.
@@ -30,6 +31,28 @@ const ITEM_TYPE_LABELS = {
   nach: "נ\"ך",
   other: "אחר",
 };
+
+const ITEM_TYPE_PLURALS = {
+  tefillin_pair: "זוגות תפילין",
+  tefillin_head: "תפילין ראש",
+  tefillin_hand: "תפילין יד",
+  mezuzah: "מזוזות",
+  megillah: "מגילות",
+  sefer_torah: "ספרי תורה",
+  nach: "ספרי נ\"ך",
+  other: "פריטים",
+};
+
+const DEFAULT_SMS_TEMPLATE = '{items} חזרו מבדיקת סת"ם ומחכים לך ביודאיקה פלוס חב"ד.';
+
+// מסכם רשימת שקיות לטקסט קריא ("2 מזוזות, תפילין זוג") — לשימוש בתבנית הודעת ה-SMS.
+function summarizeItems(bags) {
+  const totals = {};
+  for (const b of bags) totals[b.item_type] = (totals[b.item_type] || 0) + (b.quantity || 1);
+  return Object.entries(totals)
+    .map(([type, qty]) => (qty > 1 ? `${qty} ${ITEM_TYPE_PLURALS[type] || ITEM_TYPE_LABELS[type] || type}` : (ITEM_TYPE_LABELS[type] || type)))
+    .join(", ");
+}
 
 // קוד שקית מספרי בלבד (כמו ברקוד של חנות) — מספר הזמנה + 2 ספרות רצף שקית, בלי מפריד.
 // למשל הזמנה 1234, שקית 2 -> "123402".
@@ -209,17 +232,32 @@ async function loadBagForScan(code) {
   return rows[0] || null;
 }
 
+// כל השקיות של אותו טלפון שעוד לא עודכנו ללקוח (כולל השקית הנסרקת עצמה) — כדי שדיווח אחד
+// יכסה את כולן בבת אחת, בלי צורך לדווח כל שקית בנפרד כשכמה הזמנות חזרו יחד לאותו לקוח.
+async function findUnnotifiedGroup(phone) {
+  const { rows } = await pool.query(
+    `select b.id, b.bag_code, b.item_type, b.quantity, o.order_number
+     from bags b join orders o on o.id = b.order_id join customers c on c.id = o.customer_id
+     where c.phone = $1 and b.status = 'returned' and b.customer_notified_at is null`,
+    [phone]
+  );
+  return rows;
+}
+
 // סריקה מהירה בחנות מול הלקוח הסופי, לשקיות שכבר חזרו מהספק. action נבחר מראש ע"י הצוות
-// (לא מנוחש לפי מצב השקית) — "notify" מסמן שהלקוח קיבל עדכון ושולח SMS, "collect" מסמן שנאסף
-// ע"י הלקוח. תומך גם בכמה שקיות בבת אחת (bag_codes) — לסריקה רציפה או לסימון V מרשימה.
+// (לא מנוחש לפי מצב השקית): "notify_manual" מסמן שהלקוח עודכן בדרך כלשהי מחוץ למערכת (טלפון
+// וכד') בלי לשלוח כלום; "notify_sms" שולח SMS אמיתי ורק אם נשלח בהצלחה מסמן כמו notify_manual;
+// "collect" מסמן שנאסף ע"י הלקוח. notify_* מקבצים לפי מספר טלפון — דיווח על שקית אחת מסמן
+// אוטומטית את כל שקיות אותו טלפון שעדיין לא עודכנו (למשל כמה הזמנות שחזרו ביחד). תומך בכמה
+// שקיות בבת אחת (bag_codes) — לסריקה רציפה או ללחיצה מרשימה.
 router.post("/scan", asyncHandler(async (req, res) => {
   const { bag_codes, action } = req.body || {};
   if (!Array.isArray(bag_codes) || bag_codes.length === 0) {
     res.status(400).json({ error: "bag_codes נדרש" });
     return;
   }
-  if (!["notify", "collect"].includes(action)) {
-    res.status(400).json({ error: "action חייב להיות notify או collect" });
+  if (!["notify_manual", "notify_sms", "collect"].includes(action)) {
+    res.status(400).json({ error: "action חייב להיות notify_manual, notify_sms או collect" });
     return;
   }
 
@@ -237,17 +275,39 @@ router.post("/scan", asyncHandler(async (req, res) => {
       continue;
     }
 
-    if (action === "notify") {
-      if (bag.customer_notified_at && Date.now() - new Date(bag.customer_notified_at).getTime() < SCAN_DUPLICATE_WINDOW_MS) {
-        results.push({ bag_code: code, ok: true, action: "duplicate", order_number: bag.order_number, customer });
+    if (action === "notify_manual" || action === "notify_sms") {
+      if (bag.customer_notified_at) {
+        results.push({
+          bag_code: code, ok: true, action: "duplicate", order_number: bag.order_number, customer,
+          message: "הלקוח כבר עודכן — ככל הנראה כחלק מדיווח על שקית אחרת שלו",
+        });
         continue;
       }
-      await pool.query("update bags set customer_notified_at = now(), updated_at = now() where id = $1", [bag.id]);
-      sendSms(bag.phone, `שלום ${bag.first_name}, ההזמנה שלך מספר ${bag.order_number} מוכנה לאיסוף בחנות.`).catch((e) =>
-        console.error("sendSms failed", bag.bag_code, e.message)
+
+      const group = await findUnnotifiedGroup(bag.phone);
+      if (action === "notify_sms") {
+        const template = await getSetting("sms_notify_template", DEFAULT_SMS_TEMPLATE);
+        const message = template.replace("{items}", summarizeItems(group));
+        try {
+          await sendSms(bag.phone, message);
+        } catch (e) {
+          results.push({ bag_code: code, ok: false, error: "שליחת SMS נכשלה: " + e.message });
+          continue;
+        }
+      }
+
+      await pool.query(
+        "update bags set customer_notified_at = now(), updated_at = now() where id = any($1)",
+        [group.map((g) => g.id)]
       );
-      logActivity(bag.bag_code, bag.order_number, "customer_notified", null);
-      results.push({ bag_code: code, ok: true, action: "notified", order_number: bag.order_number, customer });
+      const groupNote = group.length > 1 ? ` · קובצו ${group.length} שקיות של אותו טלפון` : "";
+      for (const g of group) {
+        logActivity(g.bag_code, g.order_number, "customer_notified", (action === "notify_sms" ? "SMS" : "ידני") + groupNote);
+      }
+      results.push({
+        bag_code: code, ok: true, action: "notified", order_number: bag.order_number, customer,
+        grouped_bag_codes: group.map((g) => g.bag_code),
+      });
       continue;
     }
 
@@ -262,6 +322,22 @@ router.post("/scan", asyncHandler(async (req, res) => {
   }
 
   res.json({ results });
+}));
+
+// הגדרות (כרגע רק תבנית ה-SMS) — למסך "ניהול". נרשם לפני ה-route הפרמטרי /:order_number כדי שלא יתבלע בו.
+router.get("/settings", asyncHandler(async (req, res) => {
+  const sms_notify_template = await getSetting("sms_notify_template", DEFAULT_SMS_TEMPLATE);
+  res.json({ sms_notify_template });
+}));
+router.put("/settings", asyncHandler(async (req, res) => {
+  const { sms_notify_template } = req.body || {};
+  if (!sms_notify_template || !sms_notify_template.trim()) {
+    res.status(400).json({ error: "sms_notify_template נדרש" });
+    return;
+  }
+  await setSetting("sms_notify_template", sms_notify_template.trim());
+  logActivity(null, null, "settings_changed", "sms_notify_template");
+  res.json({ ok: true });
 }));
 
 // יומן פעולות אחרונות — למסך "ניהול". נרשם לפני ה-route הפרמטרי /:order_number כדי שלא יתבלע בו.
