@@ -62,13 +62,14 @@ create table if not exists bags (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-create index if not exists idx_bags_order on bags(order_id);
-create index if not exists idx_bags_status on bags(status);
-create index if not exists idx_bags_collection on bags(collection_id);
--- טבלה ישנה לא כללה את העמודות האלה — מוסיפים בדיעבד, idempotent
+-- טבלה ישנה לא כללה את העמודות האלה — מוסיפים בדיעבד, idempotent. חייב לרוץ לפני יצירת
+-- האינדקס על collection_id, אחרת ב-DB קיים (שבו ה-create table היה no-op) העמודה עוד לא קיימת.
 alter table bags add column if not exists collection_id uuid references collections(id);
 alter table bags add column if not exists customer_notified_at timestamptz;
 alter table bags add column if not exists customer_collected_at timestamptz;
+create index if not exists idx_bags_order on bags(order_id);
+create index if not exists idx_bags_status on bags(status);
+create index if not exists idx_bags_collection on bags(collection_id);
 
 -- מפתחות API. נשמר רק hash, לא הערך עצמו.
 -- scope: 'internal' (צוות החנות — /api/orders) | 'supplier' (ספק חיצוני — /api/supplier/*)
