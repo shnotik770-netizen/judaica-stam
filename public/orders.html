@@ -154,11 +154,15 @@
   .cam-controls .zoom-row{gap:4px;flex:0 0 auto;}
   .cam-controls .zoom-row button{width:34px;height:36px;font-size:20px;}
   .cam-controls .zoom-row .zoom-level{min-width:38px;font-size:12px;}
+  /* במצב פעולה מהירה: רק הכותרת העליונה וצבע הדף מסמנים את המצב — מסתירים את הסימונים הכפולים */
+  body.qa-on .qa-hide{display:none !important;}
+  #qaBanner .qa-actions{display:flex;gap:6px;flex-shrink:0;}
+  #qaBanner button.qa-cam{background:rgba(255,255,255,.18);color:#fff;border:1px solid rgba(255,255,255,.7);padding:6px 10px;font-size:12px;}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div id="qaBanner" class="hidden"><div><span class="qa-title"></span><small></small></div><button type="button" id="qaBannerCancel">יציאה</button></div>
+  <div id="qaBanner" class="hidden"><div><span class="qa-title"></span><small></small></div><div class="qa-actions"><button type="button" class="qa-cam" id="qaCameraBtn">📷 מצלמה</button><button type="button" id="qaBannerCancel">יציאה</button></div></div>
   <div class="top-bar">
     <h1>חנות יודאייקה</h1>
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
@@ -168,6 +172,24 @@
   </div>
 
   <div id="smsAlerts" class="hidden"></div>
+
+  <div id="quickActionChooser" class="card hidden" style="gap:10px;">
+    <div class="sub" style="margin:0;">איזו פעולה מהירה? (סריקה או לחיצה על שורה ברשימה תבצע אותה מיד)</div>
+    <div class="purpose-grid">
+      <button type="button" class="purpose-btn" data-purpose="notify_manual">✅ לקוח עודכן</button>
+      <button type="button" class="purpose-btn" data-purpose="notify_sms">📨 דיווח ללקוח (SMS)</button>
+      <button type="button" class="purpose-btn" data-purpose="collect">📦 מסירה ללקוח</button>
+    </div>
+  </div>
+
+  <div id="quickActionActive" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
+    <div class="purpose-bar qa-hide">
+      <span id="quickActionLabel"></span>
+      <div style="display:flex;gap:6px;">
+        <button type="button" id="quickScanToggle">📷 סריקה מהירה</button>
+        <button type="button" id="quickActionCancel">בטל</button>
+      </div>
+    </div>
 
   <div class="tabs">
     <div class="tab active" data-tab="new">הזמנה חדשה</div>
@@ -225,28 +247,8 @@
     </div>
     <input id="filterSearch" placeholder="חיפוש לפי שם / טלפון / מספר הזמנה…">
 
-    <button type="button" class="btn-ghost" id="quickActionToggle">⚡ פעולות מהירות</button>
-
-    <div id="quickActionChooser" class="hidden">
-      <div class="sub" style="margin:0 0 8px;">מה מטרת הפעולה המהירה? (לחיצה על שורה ברשימה תבצע אותה מיד)</div>
-      <div class="purpose-grid">
-        <button type="button" class="purpose-btn" data-purpose="notify_manual">✅ לקוח עודכן</button>
-        <button type="button" class="purpose-btn" data-purpose="notify_sms">📨 דיווח ללקוח (SMS)</button>
-        <button type="button" class="purpose-btn" data-purpose="collect">📦 מסירה ללקוח</button>
-      </div>
-    </div>
-
-    <div id="quickActionActive" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
-      <div class="purpose-bar">
-        <span id="quickActionLabel"></span>
-        <div style="display:flex;gap:6px;">
-          <button type="button" id="quickScanToggle">📷 סריקה מהירה</button>
-          <button type="button" id="quickActionCancel">בטל</button>
-        </div>
-      </div>
-
       <div id="quickScanPanel" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
-        <div class="mode-tabs">
+        <div class="mode-tabs qa-hide">
           <div class="mode-tab active" data-mode="device">⌨️ סורק מחובר</div>
           <div class="mode-tab" data-mode="camera">📷 מצלמה</div>
         </div>
@@ -845,6 +847,7 @@ function setQuickModeTheme(type, title, hint){
   const banner = document.getElementById('qaBanner');
   if (!type) { banner.classList.add('hidden'); return; }
   document.body.classList.add('qa-' + type);
+  document.body.classList.add('qa-on');
   banner.querySelector('.qa-title').textContent = '⚡ פעולה מהירה פעילה: ' + title;
   banner.querySelector('small').textContent = hint || '';
   banner.classList.remove('hidden');
@@ -883,24 +886,22 @@ const QUICK_ACTION_LABELS = {
   collect: '📦 מצב פעיל: מסירה ללקוח',
 };
 
-// קיצור בראש הדף: עובר ל"כל ההזמנות" ופותח ישר את בחירת הפעולה המהירה
+// "⚡ פעולות מהירות" בראש הדף פותח/סוגר את 3 האפשרויות; בחירה עוברת ל"כל ההזמנות" ומפעילה את המצב
 document.getElementById('quickActionShortcut').addEventListener('click', () => {
-  document.querySelector('.tab[data-tab="list"]').click();
-  if (!quickAction) document.getElementById('quickActionChooser').classList.remove('hidden');
-  document.getElementById('quickActionToggle').scrollIntoView({ behavior: 'smooth', block: 'start' });
-});
-document.getElementById('quickActionToggle').addEventListener('click', () => {
   document.getElementById('quickActionChooser').classList.toggle('hidden');
 });
 
 document.querySelectorAll('.purpose-btn').forEach(b => b.addEventListener('click', () => {
-  quickAction = b.dataset.purpose;
   document.getElementById('quickActionChooser').classList.add('hidden');
+  if (quickAction) cancelQuickAction();
+  document.querySelector('.tab[data-tab="list"]').click();
+  quickAction = b.dataset.purpose;
   document.getElementById('quickActionActive').classList.remove('hidden');
   document.getElementById('quickActionLabel').textContent = QUICK_ACTION_LABELS[quickAction];
   setQuickModeTheme(quickAction, QUICK_ACTION_TITLES[quickAction][0], QUICK_ACTION_TITLES[quickAction][1]);
   document.getElementById('actionLog').innerHTML = '';
   document.getElementById('filterStatus').disabled = true;
+  openQuickScanArea();
   loadList();
 }));
 
@@ -1115,6 +1116,7 @@ async function startCamera(){
       () => {}
     );
     cameraRunning = true;
+    syncQaCameraBtn();
     btn.textContent = '⏹ עצור';
     btn.classList.add('stop');
     setupTorchButton(html5Qr, 'cameraTorch');
@@ -1131,6 +1133,7 @@ async function stopCamera(){
   if (!cameraRunning || !html5Qr) return;
   try { await html5Qr.stop(); html5Qr.clear(); } catch (e) {}
   cameraRunning = false;
+  syncQaCameraBtn();
   document.getElementById('cameraWrap').classList.add('hidden');
   document.getElementById('cameraToggle').textContent = 'הפעל מצלמה';
   document.getElementById('cameraToggle').classList.remove('stop');
@@ -1362,6 +1365,27 @@ async function syncSmsAlerts(){
 }
 renderSmsAlerts();
 syncSmsAlerts();
+// --- כפתור "📷 מצלמה" בפינת הכותרת של מצב פעולה מהירה: מפעיל/עוצר את המצלמה (שדה הסריקה לסורק מחובר פתוח תמיד) ---
+function syncQaCameraBtn(){
+  document.getElementById('qaCameraBtn').textContent = cameraRunning ? '⏹ עצור מצלמה' : '📷 מצלמה';
+}
+function showScanMode(isDevice){
+  document.querySelectorAll('#quickScanPanel .mode-tab').forEach(t => t.classList.toggle('active', (t.dataset.mode === 'device') === isDevice));
+  document.getElementById('deviceMode').classList.toggle('hidden', !isDevice);
+  document.getElementById('cameraMode').classList.toggle('hidden', isDevice);
+}
+// כניסה למצב פעולה מהירה: פאנל הסריקה פתוח מיד במצב סורק מחובר
+function openQuickScanArea(){
+  document.getElementById('quickScanPanel').classList.remove('hidden');
+  showScanMode(true);
+  syncQaCameraBtn();
+}
+document.getElementById('qaCameraBtn').addEventListener('click', async () => {
+  if (cameraRunning) { await stopCamera(); showScanMode(true); return; }
+  document.getElementById('quickScanPanel').classList.remove('hidden');
+  showScanMode(false);
+  await startCamera();
+});
 </script>
 </body>
 </html>
