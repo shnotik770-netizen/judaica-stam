@@ -123,44 +123,14 @@
   </div>
 
   <div class="tabs">
-    <div class="tab active" data-tab="scan">סריקה</div>
-    <div class="tab" data-tab="pending">ממתין לאיסוף</div>
-    <div class="tab" data-tab="mine">מה אצלי</div>
+    <div class="tab active" data-tab="pending">ממתינים לאיסוף</div>
+    <div class="tab" data-tab="mine">אצלי</div>
     <div class="tab" data-tab="history">🕘 היסטוריה</div>
-  </div>
-
-  <div id="scanPanel" class="card">
-    <div class="mode-tabs">
-      <div class="mode-tab active" data-mode="device">⌨️ סורק מחובר</div>
-      <div class="mode-tab" data-mode="camera">📷 מצלמה</div>
-    </div>
-
-    <div id="deviceMode">
-      <input id="scanInput" class="scan-input" placeholder="סרוק ברקוד…" autofocus>
-    </div>
-
-    <div id="cameraMode" class="hidden" style="display:flex;flex-direction:column;gap:10px;">
-      <div class="cam-controls">
-        <button type="button" class="camera-toggle" id="cameraToggle">הפעל מצלמה</button>
-        <button type="button" class="camera-toggle hidden" id="cameraTorch" style="background:var(--surface-2);color:var(--text);">🔦 פנס</button>
-        <div class="zoom-row hidden" id="cameraZoom"><button type="button" class="zoom-out" aria-label="הרחק">−</button><span class="zoom-level"></span><button type="button" class="zoom-in" aria-label="קרב">+</button></div>
-        <button type="button" class="camera-toggle hidden" id="cameraSwitch" style="background:var(--surface-2);color:var(--text);">🔄 החלף</button>
-      </div>
-      <div id="cameraWrap" class="hidden"><div id="cameraReader"></div></div>
-      <div class="camera-hint">סריקה רציפה — תעבירו פריט אחרי פריט מול המצלמה, בלי לצלם/לאשר כל אחד בנפרד</div>
-    </div>
-
-    <div class="summary">
-      <div class="stat"><b id="sCount">0</b><span>נסרקו</span></div>
-      <div class="stat"><b id="sOk">0</b><span>תקינים</span></div>
-      <div class="stat"><b id="sWarn">0</b><span>דורש בירור</span></div>
-    </div>
-    <div class="log" id="log"></div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
-  <div id="pendingPanel" class="card hidden">
+  <div id="pendingPanel" class="card">
     <input class="search" id="pendingSearch" placeholder="חיפוש לפי שם / טלפון / כתובת…">
     <div style="display:flex;justify-content:space-between;align-items:center;">
       <span style="font-size:13px;color:var(--text-muted);" id="pendingCount"></span>
@@ -244,16 +214,13 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
   t.classList.add('active');
   const tab = t.dataset.tab;
-  document.getElementById('scanPanel').classList.toggle('hidden', tab !== 'scan');
   document.getElementById('pendingPanel').classList.toggle('hidden', tab !== 'pending');
   document.getElementById('minePanel').classList.toggle('hidden', tab !== 'mine');
   document.getElementById('historyPanel').classList.toggle('hidden', tab !== 'history');
   if (!wasActive) closeQuickAction();
-  if (tab === 'scan') { document.getElementById('scanInput').focus(); return; }
-  stopCamera();
   if (tab === 'pending') loadPending(); else if (tab === 'history') loadHistoryList(); else loadMine();
 }));
-window.addEventListener('pagehide', () => { stopCamera(); stopQuickCamera(); });
+window.addEventListener('pagehide', () => { stopQuickCamera(); });
 
 // --- beep ---
 // שורת מידע קלילה בראש המסך עם מספר השקית, המוצר והפעולה שבוצעה — בנוסף לצליל. kind: 'ok' (ירוק) או 'warn' (אדום).
@@ -301,91 +268,6 @@ function beep(freq, dur){
   }catch(e){}
 }
 
-// --- scan ---
-let counts = { total:0, ok:0, warn:0 };
-function updateSummary(){
-  document.getElementById('sCount').textContent = counts.total;
-  document.getElementById('sOk').textContent = counts.ok;
-  document.getElementById('sWarn').textContent = counts.warn;
-}
-function addLog(kind, title, detail){
-  const el = document.createElement('div');
-  el.className = 'entry ' + kind;
-  el.innerHTML = '<b></b><div class="d"></div>';
-  el.querySelector('b').textContent = title;
-  el.querySelector('.d').textContent = detail;
-  document.getElementById('log').appendChild(el);
-}
-
-// מטפל בקוד שהתקבל, בין אם הוקלד/נסרק ע"י סורק מחובר ובין אם זוהה ע"י המצלמה
-async function processScan(code){
-  code = (code || '').trim();
-  if (!code) return;
-
-  counts.total++;
-  try {
-    const res = await fetch('/api/supplier/scan', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bag_code: code }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      counts.warn++;
-      addLog('warn', code, data.error || 'שגיאה');
-      flashScan('warn', code, '', data.error || 'שגיאה');
-      beep(220, 0.3);
-    } else {
-      const who = data.bag.customer.first_name + ' ' + data.bag.customer.last_name;
-      const item = (ITEM_LABELS[data.bag.item_type] || data.bag.item_type) + (data.bag.quantity > 1 ? ' ×' + data.bag.quantity : '');
-      if (data.action === 'picked_up') {
-        counts.ok++; addLog('ok', who + ' — נאסף', item + ' · הזמנה #' + data.bag.order_number); beep(880, 0.15);
-        flashScan('ok', data.bag.bag_code, item, '✓ נאסף', who);
-      } else if (data.action === 'returned') {
-        counts.ok++; addLog('ok', who + ' — הוחזר', item + ' · הזמנה #' + data.bag.order_number); beep(880, 0.15); beep(660, 0.15);
-        flashScan('ok', data.bag.bag_code, item, '✓ הוחזר לחנות', who);
-      } else {
-        counts.warn++; addLog('warn', who + ' — סריקה כפולה', 'אותה שקית נסרקה הרגע, לא נרשם שוב');
-        flashScan('warn', data.bag.bag_code, item, 'סריקה כפולה — לא נרשם שוב', who);
-      }
-    }
-  } catch (err) {
-    counts.warn++;
-    addLog('err', code, 'שגיאת רשת: ' + err.message);
-  }
-  updateSummary();
-}
-
-// --- מצב סורק מחובר (keyboard-wedge) ---
-const scanInput = document.getElementById('scanInput');
-scanInput.addEventListener('keydown', async (e) => {
-  if (e.key !== 'Enter') return;
-  const code = scanInput.value.trim();
-  scanInput.value = '';
-  await processScan(code);
-  scanInput.focus();
-});
-document.body.addEventListener('click', () => {
-  const deviceVisible = !document.getElementById('scanPanel').classList.contains('hidden') &&
-                         !document.getElementById('deviceMode').classList.contains('hidden');
-  if (deviceVisible) scanInput.focus();
-});
-
-// --- מצב מצלמה — סריקה רציפה, בלי לצלם/לאשר כל קוד בנפרד ---
-document.querySelectorAll('.mode-tab').forEach(t => t.addEventListener('click', () => {
-  document.querySelectorAll('.mode-tab').forEach(x => x.classList.remove('active'));
-  t.classList.add('active');
-  const isDevice = t.dataset.mode === 'device';
-  document.getElementById('deviceMode').classList.toggle('hidden', !isDevice);
-  document.getElementById('cameraMode').classList.toggle('hidden', isDevice);
-  if (isDevice) { stopCamera(); scanInput.focus(); }
-}));
-
-let html5Qr = null;
-let cameraRunning = false;
-const recentlySeen = new Map(); // code -> timestamp, מונע עיבוד כפול של אותו קוד בזמן שהוא עדיין מול המצלמה
-const CAMERA_DEBOUNCE_MS = 3000;
-
 // מונה את המצלמות הזמינות (פעם אחת, מבקש הרשאה אם צריך) ובוחר כברירת מחדל את האחורית —
 // לפי label אם יש ("back"/"rear"/"environment"), אחרת מצלמה אחרונה ברשימה (נפוץ שזו האחורית).
 // facingMode:'environment' לבדו לא תמיד אמין (נצפה שפתח מצלמה קדמית במכשיר אמיתי). משותף
@@ -411,14 +293,6 @@ function cameraVideoConstraints(cameras){
     ? { deviceId: { exact: cameras[currentCameraIndex].id } }
     : { facingMode: { ideal: 'environment' } };
   return { ...select, width: { ideal: 1920 }, height: { ideal: 1080 } };
-}
-
-async function onCameraDecode(decodedText){
-  const now = Date.now();
-  const last = recentlySeen.get(decodedText);
-  if (last && now - last < CAMERA_DEBOUNCE_MS) return; // אותו קוד עדיין בשדה הראייה — מתעלמים
-  recentlySeen.set(decodedText, now);
-  await processScan(decodedText);
 }
 
 // בודק אם המצלמה הפעילה תומכת בפנס, ומציג/מסתיר את כפתור הפנס בהתאם. משותף לשני מצבי המצלמה בדף הזה.
@@ -465,75 +339,10 @@ async function toggleTorch(instance, btnId, logFn){
     await instance.applyVideoConstraints({ advanced: [{ torch: torchOn }] });
     btn.textContent = torchOn ? '🔦 כבה' : '🔦 פנס';
   } catch (e) {
-    (logFn || addLog)('warn', 'פנס', 'לא ניתן להפעיל פנס במכשיר הזה');
+    (logFn || addQuickLog)('warn', 'פנס', 'לא ניתן להפעיל פנס במכשיר הזה');
   }
 }
 
-async function startCamera(){
-  const wrap = document.getElementById('cameraWrap');
-  const btn = document.getElementById('cameraToggle');
-  wrap.classList.remove('hidden');
-  btn.textContent = 'עוצר…';
-  html5Qr = new Html5Qrcode('cameraReader', {
-    formatsToSupport: [
-      Html5QrcodeSupportedFormats.CODE_128,
-      Html5QrcodeSupportedFormats.QR_CODE,
-    ],
-    verbose: false,
-  });
-  const cameras = await getCameraDevices();
-  const cameraIdOrConfig = cameras.length ? cameras[currentCameraIndex].id : { facingMode: 'environment' };
-  try {
-    await html5Qr.start(
-      cameraIdOrConfig,
-      {
-        fps: 15,
-        qrbox: (w, h) => ({ width: Math.max(80, Math.min(280, Math.floor(w * 0.9))), height: Math.max(60, Math.min(140, Math.floor(h * 0.6))) }),
-        videoConstraints: cameraVideoConstraints(cameras),
-        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-      },
-      onCameraDecode,
-      () => {} // שגיאת פענוח פריים בודד — מתעלמים, זה קורה כל הזמן בין סריקות תקינות
-    );
-    cameraRunning = true;
-    btn.textContent = '⏹ עצור';
-    btn.classList.add('stop');
-    setupTorchButton(html5Qr, 'cameraTorch');
-    setupZoomControls(html5Qr, 'cameraZoom');
-    document.getElementById('cameraSwitch').classList.toggle('hidden', cameras.length < 2);
-  } catch (err) {
-    addLog('err', 'מצלמה', 'לא הצלחתי לפתוח מצלמה: ' + (err?.message || err?.name || String(err)));
-    wrap.classList.add('hidden');
-    btn.textContent = 'הפעל מצלמה';
-  }
-}
-
-async function stopCamera(){
-  if (!cameraRunning || !html5Qr) return;
-  try { await html5Qr.stop(); html5Qr.clear(); } catch (e) {}
-  cameraRunning = false;
-  document.getElementById('cameraWrap').classList.add('hidden');
-  document.getElementById('cameraToggle').textContent = 'הפעל מצלמה';
-  document.getElementById('cameraToggle').classList.remove('stop');
-  document.getElementById('cameraTorch').classList.add('hidden');
-  document.getElementById('cameraZoom').classList.add('hidden');
-  document.getElementById('cameraSwitch').classList.add('hidden');
-}
-
-async function switchCamera(){
-  if (!cameraRunning || cameraDevices.length < 2) return;
-  currentCameraIndex = (currentCameraIndex + 1) % cameraDevices.length;
-  await stopCamera();
-  await startCamera();
-}
-
-document.getElementById('cameraToggle').addEventListener('click', () => {
-  if (cameraRunning) stopCamera(); else startCamera();
-});
-document.getElementById('cameraTorch').addEventListener('click', () => {
-  if (cameraRunning) toggleTorch(html5Qr, 'cameraTorch');
-});
-document.getElementById('cameraSwitch').addEventListener('click', switchCamera);
 
 // --- רשימות (ממתין לאיסוף / מה אצלי) + חיפוש חכם לפי שם/טלפון/כתובת ---
 function esc(s){
@@ -903,6 +712,8 @@ document.querySelectorAll('#quickScanChooser .purpose-btn').forEach(b => b.addEv
   if (sub.classList.contains('hidden')) document.getElementById('quickScanToggle').click();
   document.getElementById('quickActionPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }));
+// טאב ברירת המחדל: ממתינים לאיסוף
+loadPending();
 </script>
 </body>
 </html>
