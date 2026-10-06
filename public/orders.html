@@ -214,7 +214,7 @@
 
   <div id="listPanel" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
     <div id="printFailuresBanner" class="hidden" style="font-size:13.5px;font-weight:600;color:#fff;background:var(--danger);border-radius:9px;padding:9px 12px;text-align:center;cursor:pointer;"></div>
-    <div class="filters">
+    <div class="filters qa-hide">
       <select id="filterItemType">
         <option value="">כל סוגי הפריט</option>
         <option value="tefillin_pair">תפילין זוג</option>
@@ -559,8 +559,9 @@ async function loadList(){
   const itemType = document.getElementById('filterItemType').value;
   const collection = document.getElementById('filterCollection').value;
   const q = document.getElementById('filterSearch').value.trim();
-  if (itemType) params.set('item_type', itemType);
-  if (collection) params.set('collection_number', collection);
+  // במצב פעולה מהירה שורת המסננים מוסתרת — לא מסננים לפיה (שלא תסתיר שקיות בלי שרואים למה)
+  if (itemType && !quickAction) params.set('item_type', itemType);
+  if (collection && !quickAction) params.set('collection_number', collection);
   if (q) params.set('q', q);
   if (quickAction) {
     // במצב פעולה מהירה מציגים רק שקיות שמתאימות לפעולה הנבחרת — לא לפי המסנן הידני
