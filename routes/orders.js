@@ -180,6 +180,13 @@ const BAG_STATUS_CONDITIONS = {
   collected: "b.status = 'returned' and b.customer_collected_at is not null",
 };
 
+// סיכום מהיר — "X ממתינים לאיסוף, X אצל מיכאל" — מוצג מיד בכניסה לטאב "כל ההזמנות".
+router.get("/summary", asyncHandler(async (req, res) => {
+  const { rows } = await pool.query("select status, count(*)::int as count from bags group by status");
+  const counts = Object.fromEntries(rows.map((r) => [r.status, r.count]));
+  res.json({ waiting_pickup: counts.waiting_pickup || 0, with_supplier: counts.with_supplier || 0 });
+}));
+
 // רשימת שקיות עם מסננים — למסך "כל ההזמנות" (סוג פריט, מספר איסוף, סטטוס, חיפוש חופשי)
 router.get("/bags", asyncHandler(async (req, res) => {
   const { item_type, collection_number, status, q } = req.query;
@@ -348,10 +355,14 @@ router.put("/settings", asyncHandler(async (req, res) => {
 }));
 
 // יומן פעולות אחרונות — למסך "ניהול". נרשם לפני ה-route הפרמטרי /:order_number כדי שלא יתבלע בו.
-// אפשר לסנן לפי bag_code כדי לראות את כל ההיסטוריה של שקית ספציפית (כולל כל הפעמים שדווחה).
+// bag_code (התאמה מדויקת) — להיסטוריה המלאה של שקית ספציפית (מסך העריכה). q (חיפוש חכם) —
+// מסנן גם לפי קוד שקית/מספר הזמנה וגם לפי שם/טלפון הלקוח (דרך join ל-bags/orders/customers,
+// כי activity_log עצמה לא שומרת פרטי לקוח) — לתיבת החיפוש בטאב "ניהול".
 router.get("/activity-log", asyncHandler(async (req, res) => {
   const limit = Math.min(+req.query.limit || 100, 500);
   const bagCode = (req.query.bag_code || "").trim();
+  const q = (req.query.q || "").trim();
+
   if (bagCode) {
     const { rows } = await pool.query(
       "select bag_code, order_number, action, detail, created_at from activity_log where bag_code = $1 order by created_at desc limit $2",
@@ -360,6 +371,24 @@ router.get("/activity-log", asyncHandler(async (req, res) => {
     res.json({ log: rows });
     return;
   }
+
+  if (q) {
+    const { rows } = await pool.query(
+      `select al.bag_code, al.order_number, al.action, al.detail, al.created_at
+       from activity_log al
+       left join bags b on b.bag_code = al.bag_code
+       left join orders ob on ob.id = b.order_id
+       left join orders oo on oo.order_number = al.order_number
+       left join customers c on c.id = coalesce(ob.customer_id, oo.customer_id)
+       where al.bag_code ilike $1 or al.order_number ilike $1 or
+             c.first_name ilike $1 or c.last_name ilike $1 or c.phone ilike $1
+       order by al.created_at desc limit $2`,
+      [`%${q}%`, limit]
+    );
+    res.json({ log: rows });
+    return;
+  }
+
   const { rows } = await pool.query(
     "select bag_code, order_number, action, detail, created_at from activity_log order by created_at desc limit $1",
     [limit]

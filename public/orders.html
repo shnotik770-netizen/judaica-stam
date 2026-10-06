@@ -145,6 +145,7 @@
   </div>
 
   <div id="listPanel" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
+    <div id="statusSummary" style="font-size:13.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);border-radius:9px;padding:9px 12px;text-align:center;"></div>
     <div class="filters">
       <select id="filterItemType">
         <option value="">כל סוגי הפריט</option>
@@ -280,7 +281,7 @@
         <b>יומן פעולות</b>
         <button class="reload" id="reloadLog">רענן</button>
       </div>
-      <input id="logBagFilter" placeholder="סינון לפי קוד שקית (ריק = הכל)">
+      <input id="logBagFilter" placeholder="חיפוש לפי קוד שקית / מספר הזמנה / שם / טלפון (ריק = הכל)">
       <div id="activityLogList" style="display:flex;flex-direction:column;gap:7px;max-height:55vh;overflow-y:auto;"></div>
     </div>
   </div>
@@ -401,7 +402,7 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   document.getElementById('editPanel').classList.add('hidden');
   document.getElementById('adminPanel').classList.toggle('hidden', tab !== 'admin');
   if (tab !== 'list') cancelQuickAction();
-  if (tab === 'list') loadList();
+  if (tab === 'list') { loadList(); loadSummary(); }
   if (tab === 'admin') { loadActivityLog(); loadSettings(); }
 }));
 
@@ -418,6 +419,18 @@ function statusBadge(b){
   if (b.status === 'returned' && b.customer_collected_at) return '<span class="badge collected">נאסף ע"י לקוח</span>';
   if (b.status === 'returned' && b.customer_notified_at) return '<span class="badge notified">עודכן ללקוח</span>';
   return STATUS_BADGE[b.status] || b.status;
+}
+
+async function loadSummary(){
+  try {
+    const res = await fetch(API_BASE + '/api/orders/summary');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה');
+    document.getElementById('statusSummary').textContent =
+      data.waiting_pickup + ' ממתינים לאיסוף · ' + data.with_supplier + ' אצל מיכאל';
+  } catch (err) {
+    document.getElementById('statusSummary').textContent = '';
+  }
 }
 
 async function loadList(){
@@ -516,14 +529,17 @@ function renderEdit(data){
   document.getElementById('editBags').innerHTML = data.bags.map(b => {
     const delBtn = editLocked ? '' : '<button type="button" class="btn-danger editDelBag" data-code="' + b.bag_code + '">מחק שקית</button>';
     const reprintBtn = '<button type="button" class="btn-ghost editReprint" data-code="' + b.bag_code + '" style="padding:6px 10px;font-size:12.5px;">🖨️ הדפס שוב</button>';
+    const historyBtn = '<button type="button" class="btn-ghost editHistory" data-code="' + b.bag_code + '" style="padding:6px 10px;font-size:12.5px;">🕘 היסטוריה</button>';
     return '<div class="bag">' +
-      '<div class="bag-head"><b>' + b.bag_code + ' · ' + statusBadge(b) + '</b><div style="display:flex;gap:8px;">' + reprintBtn + delBtn + '</div></div>' +
+      '<div class="bag-head"><b>' + b.bag_code + ' · ' + statusBadge(b) + '</b><div style="display:flex;gap:8px;flex-wrap:wrap;">' + historyBtn + reprintBtn + delBtn + '</div></div>' +
       '<div class="bag-grid">' +
       '<div class="field"><label>סוג פריט</label><select class="editItemType" data-code="' + b.bag_code + '"' + (editLocked ? ' disabled' : '') + '>' +
         itemTypeOptionsHtml(b.item_type) + '</select></div>' +
       '<div class="field"><label>כמות</label><input type="number" class="editQty" data-code="' + b.bag_code + '" value="' + b.quantity + '" min="1"' + (editLocked ? ' disabled' : '') + '></div>' +
       '<div class="field"><label>הערות</label><input class="editNote" data-code="' + b.bag_code + '" placeholder="הערה לשקית (לא חובה)" value="' + esc(b.item_type_note || '') + '"' + (editLocked ? ' disabled' : '') + '></div>' +
-      '</div></div>';
+      '</div>' +
+      '<div class="hidden" id="history-' + b.bag_code + '" style="display:flex;flex-direction:column;gap:5px;border-top:1px solid var(--border);padding-top:8px;"></div>' +
+      '</div>';
   }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:12px;">אין שקיות בהזמנה זו</div>';
 
   document.querySelectorAll('.editDelBag').forEach(btn => btn.addEventListener('click', async () => {
@@ -549,6 +565,26 @@ function renderEdit(data){
     } catch (err) {
       alert(err.message);
       btn.disabled = false;
+    }
+  }));
+
+  document.querySelectorAll('.editHistory').forEach(btn => btn.addEventListener('click', async () => {
+    const code = btn.dataset.code;
+    const container = document.getElementById('history-' + code);
+    if (!container.classList.contains('hidden')) { container.classList.add('hidden'); return; }
+    container.classList.remove('hidden');
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">טוען…</div>';
+    try {
+      const res = await fetch(API_BASE + '/api/orders/activity-log?bag_code=' + encodeURIComponent(code));
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'שגיאה');
+      container.innerHTML = data.log.map(entry => {
+        const when = new Date(entry.created_at).toLocaleString('he-IL');
+        const label = LOG_ACTION_LABELS[entry.action] || entry.action;
+        return '<div style="font-size:12px;"><b>' + esc(label) + '</b> · ' + esc(when) + (entry.detail ? ' · ' + esc(entry.detail) : '') + '</div>';
+      }).join('') || '<div style="color:var(--text-muted);font-size:12px;">אין היסטוריה עדיין</div>';
+    } catch (err) {
+      container.innerHTML = '<div style="color:var(--danger);font-size:12px;">שגיאה: ' + esc(err.message) + '</div>';
     }
   }));
 }
@@ -621,7 +657,7 @@ document.getElementById('editDeleteOrder').addEventListener('click', async () =>
     alert(err.message);
   }
 });
-document.getElementById('reloadList').onclick = loadList;
+document.getElementById('reloadList').onclick = () => { loadList(); loadSummary(); };
 document.getElementById('filterItemType').addEventListener('change', loadList);
 document.getElementById('filterStatus').addEventListener('change', loadList);
 document.getElementById('filterCollection').addEventListener('input', () => {
@@ -881,9 +917,9 @@ const LOG_ACTION_LABELS = {
 async function loadActivityLog(){
   const listEl = document.getElementById('activityLogList');
   listEl.innerHTML = '<div style="color:var(--text-muted);padding:10px;">טוען…</div>';
-  const bagFilter = document.getElementById('logBagFilter').value.trim();
+  const q = document.getElementById('logBagFilter').value.trim();
   const params = new URLSearchParams({ limit: '100' });
-  if (bagFilter) params.set('bag_code', bagFilter);
+  if (q) params.set('q', q);
   try {
     const res = await fetch(API_BASE + '/api/orders/activity-log?' + params.toString());
     const data = await res.json();
