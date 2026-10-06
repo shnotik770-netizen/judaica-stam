@@ -260,7 +260,7 @@ const SCAN_DUPLICATE_WINDOW_MS = 60 * 1000;
 
 async function loadBagForScan(code) {
   const { rows } = await pool.query(
-    `select b.id, b.bag_code, b.status, b.customer_notified_at, b.customer_collected_at,
+    `select b.id, b.bag_code, b.item_type, b.quantity, b.status, b.customer_notified_at, b.customer_collected_at,
             o.order_number, c.first_name, c.last_name, c.phone
      from bags b
      join orders o on o.id = b.order_id
@@ -321,7 +321,7 @@ router.post("/scan", asyncHandler(async (req, res) => {
     if (action === "notify_manual" || action === "notify_sms") {
       if (bag.customer_notified_at && !force) {
         results.push({
-          bag_code: code, ok: true, action: "duplicate", order_number: bag.order_number, customer,
+          bag_code: code, ok: true, action: "duplicate", order_number: bag.order_number, item_type: bag.item_type, quantity: bag.quantity, customer,
           message: "הלקוח כבר עודכן — ככל הנראה כחלק מדיווח על שקית אחרת שלו",
           notified_at: bag.customer_notified_at,
         });
@@ -352,7 +352,7 @@ router.post("/scan", asyncHandler(async (req, res) => {
         logActivity(g.bag_code, g.order_number, "customer_notified", (action === "notify_sms" ? "SMS" : "ידני") + groupNote + repeatNote, prevStates.get(g.bag_code));
       }
       results.push({
-        bag_code: code, ok: true, action: "notified", order_number: bag.order_number, customer,
+        bag_code: code, ok: true, action: "notified", order_number: bag.order_number, item_type: bag.item_type, quantity: bag.quantity, customer,
         grouped_bag_codes: group.map((g) => g.bag_code), repeat: isRepeat,
       });
       continue;
@@ -360,13 +360,13 @@ router.post("/scan", asyncHandler(async (req, res) => {
 
     // action === "collect"
     if (bag.customer_collected_at && Date.now() - new Date(bag.customer_collected_at).getTime() < SCAN_DUPLICATE_WINDOW_MS) {
-      results.push({ bag_code: code, ok: true, action: "duplicate", order_number: bag.order_number, customer });
+      results.push({ bag_code: code, ok: true, action: "duplicate", order_number: bag.order_number, item_type: bag.item_type, quantity: bag.quantity, customer });
       continue;
     }
     const prevCollect = (await snapshotBagStates([bag.bag_code])).get(bag.bag_code);
     await pool.query("update bags set customer_collected_at = now(), updated_at = now() where id = $1", [bag.id]);
     logActivity(bag.bag_code, bag.order_number, "customer_collected", null, prevCollect);
-    results.push({ bag_code: code, ok: true, action: "collected", order_number: bag.order_number, customer });
+    results.push({ bag_code: code, ok: true, action: "collected", order_number: bag.order_number, item_type: bag.item_type, quantity: bag.quantity, customer });
   }
 
   res.json({ results });

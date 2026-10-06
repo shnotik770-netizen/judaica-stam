@@ -67,6 +67,14 @@
   .purpose-bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;background:var(--accent);color:#fff;border-radius:9px;padding:10px 14px;font-size:14px;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.2);}
   .purpose-bar button{padding:6px 12px;font-size:12.5px;border:none;border-radius:7px;background:#fff;color:var(--accent);font-weight:700;cursor:pointer;}
   .filters2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  /* תצוגת המצלמה מוגבלת לשליש מסך בערך — חיתוך מלמעלה/למטה בלבד (object-fit:cover עם רוחב מלא), כך
+     שהמיפוי האופקי של אזור הסריקה ב-html5-qrcode נשאר מדויק, וזה מה שקובע בברקוד 1D */
+  #cameraReader video,#quickCameraReader video{max-height:34vh;object-fit:cover;}
+  /* שורת מידע קלילה בראש המסך אחרי סריקה/פעולה — לא מכסה את אזור העבודה ולא חוסמת לחיצות */
+  .scan-flash{position:fixed;top:0;left:0;right:0;z-index:1000;pointer-events:none;transform:translateY(-110%);transition:transform .2s ease;background:var(--ok);color:#fff;font-size:14px;font-weight:600;padding:9px 16px calc(9px) 16px;padding-top:max(9px, env(safe-area-inset-top));text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 2px 10px rgba(0,0,0,.2);}
+  .scan-flash.warn{background:var(--danger);}
+  .scan-flash.show{transform:translateY(0);}
+  .scan-flash .code{font-family:ui-monospace,monospace;font-weight:800;font-size:15px;}
 </style>
 </head>
 <body>
@@ -137,6 +145,15 @@
     <button type="button" class="btn-primary" id="mineQuickToggle">⚡ מסירה לחנות</button>
     <div id="mineQuickMount"></div>
     <div id="mineBody" style="display:flex;flex-direction:column;gap:8px;"></div>
+    <div style="border-top:1px solid var(--border);padding-top:12px;display:flex;flex-direction:column;gap:8px;">
+      <div style="font-size:13px;font-weight:600;">🕘 היסטוריה ותיקון לפי קוד שקית</div>
+      <div style="font-size:11.5px;color:var(--text-muted);">גם לשקית שכבר לא ברשימה (למשל הוחזרה לפני יותר משעתיים)</div>
+      <div style="display:flex;gap:8px;">
+        <input class="search" id="historyCode" placeholder="קוד שקית, למשל 100401" inputmode="numeric" style="flex:1;">
+        <button class="reload" id="historyLookup">הצג</button>
+      </div>
+      <div id="shist-lookup" class="hidden" style="display:flex;flex-direction:column;gap:5px;"></div>
+    </div>
   </div>
 
   <div id="quickActionPanel" class="card hidden" style="display:flex;flex-direction:column;gap:12px;">
@@ -191,6 +208,28 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
 window.addEventListener('pagehide', () => { stopCamera(); stopQuickCamera(); });
 
 // --- beep ---
+// שורת מידע קלילה בראש המסך עם מספר השקית, המוצר והפעולה שבוצעה — בנוסף לצליל. kind: 'ok' (ירוק) או 'warn' (אדום).
+let scanFlashTimer;
+function flashScan(kind, code, item, actionText, who){
+  let el = document.getElementById('scanFlash');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'scanFlash';
+    el.className = 'scan-flash';
+    el.setAttribute('role', 'status');
+    document.body.appendChild(el);
+  }
+  el.classList.toggle('warn', kind !== 'ok');
+  el.innerHTML = '<span class="code">' + esc(code || '') + '</span>' +
+    [item, actionText, who].filter(Boolean).map(t => ' · ' + esc(t)).join('');
+  el.classList.add('show');
+  clearTimeout(scanFlashTimer);
+  scanFlashTimer = setTimeout(() => el.classList.remove('show'), 1800);
+}
+function itemText(itemType, quantity){
+  if (!itemType) return '';
+  return (ITEM_LABELS[itemType] || itemType) + (quantity > 1 ? ' ×' + quantity : '');
+}
 function beep(freq, dur){
   try{
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -236,16 +275,20 @@ async function processScan(code){
     if (!res.ok) {
       counts.warn++;
       addLog('warn', code, data.error || 'שגיאה');
+      flashScan('warn', code, '', data.error || 'שגיאה');
       beep(220, 0.3);
     } else {
       const who = data.bag.customer.first_name + ' ' + data.bag.customer.last_name;
       const item = (ITEM_LABELS[data.bag.item_type] || data.bag.item_type) + (data.bag.quantity > 1 ? ' ×' + data.bag.quantity : '');
       if (data.action === 'picked_up') {
         counts.ok++; addLog('ok', who + ' — נאסף', item + ' · הזמנה #' + data.bag.order_number); beep(880, 0.15);
+        flashScan('ok', data.bag.bag_code, item, '✓ נאסף', who);
       } else if (data.action === 'returned') {
         counts.ok++; addLog('ok', who + ' — הוחזר', item + ' · הזמנה #' + data.bag.order_number); beep(880, 0.15); beep(660, 0.15);
+        flashScan('ok', data.bag.bag_code, item, '✓ הוחזר לחנות', who);
       } else {
         counts.warn++; addLog('warn', who + ' — סריקה כפולה', 'אותה שקית נסרקה הרגע, לא נרשם שוב');
+        flashScan('warn', data.bag.bag_code, item, 'סריקה כפולה — לא נרשם שוב', who);
       }
     }
   } catch (err) {
@@ -387,7 +430,7 @@ async function startCamera(){
       cameraIdOrConfig,
       {
         fps: 15,
-        qrbox: { width: 280, height: 140 },
+        qrbox: (w, h) => ({ width: Math.max(80, Math.min(280, Math.floor(w * 0.9))), height: Math.max(60, Math.min(140, Math.floor(h * 0.6))) }),
         videoConstraints: cameraVideoConstraints(cameras),
         experimentalFeatures: { useBarCodeDetectorIfSupported: true },
       },
@@ -445,14 +488,19 @@ function matchesSearch(b, q){
   return hay.includes(q);
 }
 const STAGE_LABELS = { collected: 'אספתי', imported: 'נכנס לתוכנה', returning: 'במסירה לחנות' };
-function renderRows(bags, extraLine, clickable){
+function renderRows(bags, extraLine, clickable, withHistory){
   return bags.map(b => {
     const who = esc(b.customer.first_name) + ' ' + esc(b.customer.last_name);
     const item = (ITEM_LABELS[b.item_type] || b.item_type) + (b.quantity > 1 ? ' ×' + b.quantity : '');
     const noteInfo = b.item_type_note ? ' · 📝 ' + esc(b.item_type_note) : '';
-    return '<div class="check-row"' + (clickable ? ' data-code="' + b.bag_code + '" style="cursor:pointer;"' : '') + '>' +
+    const histBtn = withHistory && !clickable
+      ? '<button type="button" class="reload histBtn" data-code="' + b.bag_code + '" style="flex-shrink:0;margin-inline-start:auto;">🕘 היסטוריה</button>' : '';
+    const histBox = withHistory && !clickable
+      ? '<div class="hidden" id="shist-' + b.bag_code + '" style="display:flex;flex-direction:column;gap:5px;padding:4px 12px 8px;"></div>' : '';
+    return '<div><div class="check-row"' + (clickable ? ' data-code="' + b.bag_code + '" style="cursor:pointer;"' : '') + '>' +
       '<div><div class="who">' + b.bag_code + ' · ' + who + '</div>' +
-      '<div class="sub">' + esc(b.customer.phone) + ' · הזמנה #' + b.order_number + ' · ' + item + noteInfo + (extraLine ? extraLine(b) : '') + '</div></div></div>';
+      '<div class="sub">' + esc(b.customer.phone) + ' · הזמנה #' + b.order_number + ' · ' + item + noteInfo + (extraLine ? extraLine(b) : '') + '</div></div>' +
+      histBtn + '</div>' + histBox + '</div>';
   }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:16px;">אין שקיות מתאימות</div>';
 }
 function wireRowClicks(containerId){
@@ -513,8 +561,14 @@ function renderMine(){
   document.getElementById('mineCount').textContent = filtered.length + ' שקיות אצלי כרגע';
   document.getElementById('mineBody').innerHTML = renderRows(filtered, (b) =>
     ' · ' + (STAGE_LABELS[b.stage] || b.stage) +
-    (b.picked_up_at ? ' · אצלי מאז ' + new Date(b.picked_up_at).toLocaleDateString('he-IL') : ''), active);
+    (b.picked_up_at ? ' · אצלי מאז ' + new Date(b.picked_up_at).toLocaleDateString('he-IL') : ''), active, true);
   if (active) wireRowClicks('mineBody');
+  document.querySelectorAll('#mineBody .histBtn').forEach(btn => btn.addEventListener('click', () => {
+    const box = document.getElementById('shist-' + btn.dataset.code);
+    if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    loadSupplierHistory(btn.dataset.code, box);
+  }));
 }
 document.getElementById('mineReload').onclick = loadMine;
 document.getElementById('mineSearch').addEventListener('input', renderMine);
@@ -583,12 +637,14 @@ async function applyQuickAction(bag_codes){
     const data = await res.json();
     if (!res.ok) {
       bag_codes.forEach(c => addQuickLog('warn', c, data.error || 'שגיאה'));
+      flashScan('warn', bag_codes.join(', '), '', data.error || 'שגיאה');
       beep(220, 0.3);
     } else {
       (data.results || []).forEach(r => {
-        if (!r.ok) { addQuickLog('warn', r.bag_code, r.error || 'שגיאה'); return; }
+        if (!r.ok) { addQuickLog('warn', r.bag_code, r.error || 'שגיאה'); flashScan('warn', r.bag_code, '', r.error || 'שגיאה'); return; }
         const who = r.bag.customer.first_name + ' ' + r.bag.customer.last_name;
         addQuickLog('ok', who, r.bag.bag_code + ' · הזמנה #' + r.bag.order_number);
+        flashScan('ok', r.bag.bag_code, itemText(r.bag.item_type, r.bag.quantity), quickAction.type === 'pickup' ? '✓ נאסף' : '✓ הוחזר לחנות', who);
       });
       beep(880, 0.15);
     }
@@ -642,7 +698,7 @@ async function startQuickCamera(){
       cameraIdOrConfig,
       {
         fps: 15,
-        qrbox: { width: 280, height: 140 },
+        qrbox: (w, h) => ({ width: Math.max(80, Math.min(280, Math.floor(w * 0.9))), height: Math.max(60, Math.min(140, Math.floor(h * 0.6))) }),
         videoConstraints: cameraVideoConstraints(cameras),
         experimentalFeatures: { useBarCodeDetectorIfSupported: true },
       },
@@ -685,6 +741,66 @@ document.getElementById('quickCameraToggle').addEventListener('click', () => {
   if (quickCameraRunning) stopQuickCamera(); else startQuickCamera();
 });
 document.getElementById('quickCameraSwitch').addEventListener('click', switchQuickCamera);
+// --- היסטוריית שקית למיכאל: צפייה בכל השורות, ותיקון (מחיקה) של שורות האיסוף/החזרה שלו בלבד —
+// מחיקה מחזירה את השקית למצב שלפני אותה פעולה (DELETE /api/orders/activity-log/:id, ראו README).
+const SUPPLIER_LOG_LABELS = {
+  order_created: 'הזמנה נוצרה', bag_added: 'שקית נוספה', label_reprinted: 'מדבקה הודפסה שוב',
+  picked_up: 'נאסף ע"י הספק', returned: 'הוחזר מהספק', customer_notified: 'עודכן ללקוח',
+  customer_collected: 'נאסף ע"י לקוח', manual_fix: 'תיקון ידני (חנות)', print_failed: 'הדפסת מדבקה נכשלה',
+};
+const SUPPLIER_EDITABLE_ACTIONS = new Set(['picked_up', 'returned']);
+function logWhenHtml(entry){
+  const d = new Date(entry.created_at);
+  const greg = d.toLocaleDateString('he-IL') + ' ' + d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+  return (entry.created_at_hebrew ? esc(entry.created_at_hebrew) + ' ' : '') +
+    '<span style="font-size:0.85em;color:var(--text-muted);">(' + esc(greg) + ')</span>';
+}
+async function loadSupplierHistory(code, box){
+  box.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">טוען…</div>';
+  try {
+    const res = await fetch('/api/orders/activity-log?bag_code=' + encodeURIComponent(code));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה');
+    box.innerHTML = data.log.map(entry => {
+      const label = SUPPLIER_LOG_LABELS[entry.action] || entry.action;
+      const del = SUPPLIER_EDITABLE_ACTIONS.has(entry.action)
+        ? '<button type="button" class="histDel" data-id="' + entry.id + '" data-label="' + esc(label) + '" title="מחק שורה — השקית תחזור למצב הקודם" ' +
+          'style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:7px;padding:3px 7px;cursor:pointer;color:var(--danger);font-size:12px;">🗑</button>' : '';
+      return '<div style="font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
+        '<div><b>' + esc(label) + '</b> · ' + logWhenHtml(entry) + '</div>' + del + '</div>';
+    }).join('') || '<div style="color:var(--text-muted);font-size:12px;">אין היסטוריה לשקית ' + esc(code) + '</div>';
+    box.querySelectorAll('.histDel').forEach(b => b.addEventListener('click', () => deleteSupplierHistoryRow(code, box, b.dataset)));
+  } catch (err) {
+    box.innerHTML = '<div style="color:var(--danger);font-size:12px;">שגיאה: ' + esc(err.message) + '</div>';
+  }
+}
+async function deleteSupplierHistoryRow(code, box, { id, label }){
+  if (!confirm('למחוק את השורה "' + label + '" של שקית ' + code + '?\nהשקית תחזור למצב שהיה לפני הפעולה הזו.')) return;
+  const call = (params) => fetch('/api/orders/activity-log/' + encodeURIComponent(id) + (params ? '?' + params : ''), { method: 'DELETE' })
+    .then(async r => ({ status: r.status, data: await r.json() }));
+  try {
+    let { status, data } = await call('');
+    if (status === 409 && data.needs_confirm) {
+      const list = data.later.map(l => '• ' + l.label + ' (' + new Date(l.created_at).toLocaleString('he-IL') + ')').join('\n');
+      if (!confirm('אחרי השורה הזו יש עוד פעולות על השקית, והן יבוטלו גם:\n' + list + '\n\nלהמשיך?')) return;
+      ({ status, data } = await call('confirm_later=1'));
+    }
+    if (status >= 400) throw new Error(data.error || 'שגיאה');
+    loadSupplierHistory(code, box);
+    loadMine(); loadPending();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+function lookupHistoryByCode(){
+  const code = document.getElementById('historyCode').value.trim();
+  const box = document.getElementById('shist-lookup');
+  if (!code) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  loadSupplierHistory(code, box);
+}
+document.getElementById('historyLookup').addEventListener('click', lookupHistoryByCode);
+document.getElementById('historyCode').addEventListener('keydown', e => { if (e.key === 'Enter') lookupHistoryByCode(); });
 </script>
 </body>
 </html>
