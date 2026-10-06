@@ -89,6 +89,7 @@
     <div id="cameraMode" class="hidden" style="display:flex;flex-direction:column;gap:10px;">
       <div id="cameraWrap" class="hidden"><div id="cameraReader"></div></div>
       <button type="button" class="camera-toggle" id="cameraToggle">הפעל מצלמה</button>
+      <button type="button" class="camera-toggle hidden" id="cameraTorch" style="background:var(--surface-2);color:var(--text);">🔦 הדלק פנס</button>
       <div class="camera-hint">סריקה רציפה — תעבירו פריט אחרי פריט מול המצלמה, בלי לצלם/לאשר כל אחד בנפרד</div>
     </div>
 
@@ -152,6 +153,7 @@
       <div id="quickCameraMode" class="hidden" style="display:flex;flex-direction:column;gap:10px;">
         <div id="quickCameraWrap" class="hidden"><div id="quickCameraReader"></div></div>
         <button type="button" class="camera-toggle" id="quickCameraToggle">הפעל מצלמה</button>
+        <button type="button" class="camera-toggle hidden" id="quickCameraTorch" style="background:var(--surface-2);color:var(--text);">🔦 הדלק פנס</button>
         <div class="camera-hint">סריקה רציפה — תעבירו שקית אחרי שקית מול המצלמה</div>
       </div>
     </div>
@@ -284,6 +286,30 @@ async function onCameraDecode(decodedText){
   await processScan(decodedText);
 }
 
+// בודק אם המצלמה הפעילה תומכת בפנס, ומציג/מסתיר את כפתור הפנס בהתאם. משותף לשני מצבי המצלמה בדף הזה.
+let torchOn = false;
+function setupTorchButton(instance, btnId){
+  const btn = document.getElementById(btnId);
+  torchOn = false;
+  btn.textContent = '🔦 הדלק פנס';
+  try {
+    const caps = instance.getRunningTrackCapabilities && instance.getRunningTrackCapabilities();
+    btn.classList.toggle('hidden', !(caps && caps.torch));
+  } catch (e) {
+    btn.classList.add('hidden');
+  }
+}
+async function toggleTorch(instance, btnId, logFn){
+  const btn = document.getElementById(btnId);
+  try {
+    torchOn = !torchOn;
+    await instance.applyVideoConstraints({ advanced: [{ torch: torchOn }] });
+    btn.textContent = torchOn ? '🔦 כבה פנס' : '🔦 הדלק פנס';
+  } catch (e) {
+    (logFn || addLog)('warn', 'פנס', 'לא ניתן להפעיל פנס במכשיר הזה');
+  }
+}
+
 async function startCamera(){
   const wrap = document.getElementById('cameraWrap');
   const btn = document.getElementById('cameraToggle');
@@ -298,14 +324,19 @@ async function startCamera(){
   });
   try {
     await html5Qr.start(
-      { facingMode: 'environment' },
-      { fps: 10, qrbox: { width: 260, height: 120 } },
+      { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+      {
+        fps: 15,
+        qrbox: { width: 280, height: 140 },
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+      },
       onCameraDecode,
       () => {} // שגיאת פענוח פריים בודד — מתעלמים, זה קורה כל הזמן בין סריקות תקינות
     );
     cameraRunning = true;
     btn.textContent = 'עצור מצלמה';
     btn.classList.add('stop');
+    setupTorchButton(html5Qr, 'cameraTorch');
   } catch (err) {
     addLog('err', 'מצלמה', 'לא הצלחתי לפתוח מצלמה: ' + (err?.message || err?.name || String(err)));
     wrap.classList.add('hidden');
@@ -320,10 +351,14 @@ async function stopCamera(){
   document.getElementById('cameraWrap').classList.add('hidden');
   document.getElementById('cameraToggle').textContent = 'הפעל מצלמה';
   document.getElementById('cameraToggle').classList.remove('stop');
+  document.getElementById('cameraTorch').classList.add('hidden');
 }
 
 document.getElementById('cameraToggle').addEventListener('click', () => {
   if (cameraRunning) stopCamera(); else startCamera();
+});
+document.getElementById('cameraTorch').addEventListener('click', () => {
+  if (cameraRunning) toggleTorch(html5Qr, 'cameraTorch');
 });
 
 // --- רשימות (ממתין לאיסוף / מה אצלי) + חיפוש חכם לפי שם/טלפון/כתובת ---
@@ -529,14 +564,19 @@ async function startQuickCamera(){
   });
   try {
     await quickCameraInstance.start(
-      { facingMode: 'environment' },
-      { fps: 10, qrbox: { width: 260, height: 120 } },
+      { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+      {
+        fps: 15,
+        qrbox: { width: 280, height: 140 },
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+      },
       onQuickCameraDecode,
       () => {}
     );
     quickCameraRunning = true;
     btn.textContent = 'עצור מצלמה';
     btn.classList.add('stop');
+    setupTorchButton(quickCameraInstance, 'quickCameraTorch');
   } catch (err) {
     addQuickLog('err', 'מצלמה', 'לא הצלחתי לפתוח מצלמה: ' + (err?.message || err?.name || String(err)));
     wrap.classList.add('hidden');
@@ -550,7 +590,11 @@ async function stopQuickCamera(){
   document.getElementById('quickCameraWrap').classList.add('hidden');
   document.getElementById('quickCameraToggle').textContent = 'הפעל מצלמה';
   document.getElementById('quickCameraToggle').classList.remove('stop');
+  document.getElementById('quickCameraTorch').classList.add('hidden');
 }
+document.getElementById('quickCameraTorch').addEventListener('click', () => {
+  if (quickCameraRunning) toggleTorch(quickCameraInstance, 'quickCameraTorch', addQuickLog);
+});
 document.getElementById('quickCameraToggle').addEventListener('click', () => {
   if (quickCameraRunning) stopQuickCamera(); else startQuickCamera();
 });
