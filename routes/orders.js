@@ -244,7 +244,7 @@ router.get("/bags", asyncHandler(async (req, res) => {
   const { rows } = await pool.query(
     `select o.order_number, c.first_name, c.last_name, c.phone,
             b.bag_code, b.item_type, b.item_type_note, b.quantity, b.status,
-            b.picked_up_at, b.returned_at, b.customer_notified_at, b.customer_collected_at, b.created_at,
+            b.picked_up_at, b.imported_at, b.returned_at, b.customer_notified_at, b.customer_collected_at, b.created_at,
             col.collection_number, col.started_at as collection_started_at
      from bags b
      join orders o on o.id = b.order_id
@@ -604,7 +604,8 @@ router.get("/:order_number", asyncHandler(async (req, res) => {
     return;
   }
   const bags = await pool.query(
-    `select bag_code, item_type, item_type_note, quantity, status, result, picked_up_at, returned_at, imported_at
+    `select bag_code, item_type, item_type_note, quantity, status, result, picked_up_at, returned_at, imported_at,
+            customer_notified_at, customer_collected_at
      from bags where order_id = $1 order by bag_code`,
     [o.rows[0].id]
   );

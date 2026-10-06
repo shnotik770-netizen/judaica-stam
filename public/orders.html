@@ -522,6 +522,8 @@ const STATUS_BADGE = {
   returned: '<span class="badge done">חזר</span>',
 };
 function statusBadge(b){
+  // אצל הספק: "נאסף" עד שהתוכנה של מיכאל מושכת אותה (imported_at, דרך GET /api/supplier/with-me)
+  if (b.status === 'with_supplier' && b.imported_at) return '<span class="badge progress">בתוכנה של מיכאל</span>';
   if (b.status === 'returned' && b.customer_collected_at) return '<span class="badge collected">נאסף ע"י לקוח</span>';
   if (b.status === 'returned' && b.customer_notified_at) return '<span class="badge notified">עודכן ללקוח</span>';
   return STATUS_BADGE[b.status] || b.status;
