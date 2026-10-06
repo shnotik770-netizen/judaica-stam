@@ -243,7 +243,8 @@ function flashScan(kind, code, item, actionText, who){
     [item, actionText, who].filter(Boolean).map(t => ' · ' + esc(t)).join('');
   el.classList.add('show');
   clearTimeout(scanFlashTimer);
-  scanFlashTimer = setTimeout(() => el.classList.remove('show'), 1800);
+  // ירוק (הצלחה) נשאר 5 שניות; אדום (שגיאה) — כמו קודם
+  scanFlashTimer = setTimeout(() => el.classList.remove('show'), kind === 'ok' ? 5000 : 1800);
 }
 function itemText(itemType, quantity){
   if (!itemType) return '';
