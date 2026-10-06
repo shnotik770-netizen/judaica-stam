@@ -146,6 +146,7 @@
 
   <div id="listPanel" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
     <div id="statusSummary" style="font-size:13.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);border-radius:9px;padding:9px 12px;text-align:center;"></div>
+    <div id="printFailuresBanner" class="hidden" style="font-size:13.5px;font-weight:600;color:#fff;background:var(--danger);border-radius:9px;padding:9px 12px;text-align:center;cursor:pointer;"></div>
     <div class="filters">
       <select id="filterItemType">
         <option value="">כל סוגי הפריט</option>
@@ -429,10 +430,20 @@ async function loadSummary(){
     if (!res.ok) throw new Error(data.error || 'שגיאה');
     document.getElementById('statusSummary').textContent =
       data.waiting_pickup + ' ממתינים לאיסוף · ' + data.with_supplier + ' אצל מיכאל';
+    const banner = document.getElementById('printFailuresBanner');
+    if (data.print_failures_24h > 0) {
+      banner.textContent = '⚠️ ' + data.print_failures_24h + ' מדבקות לא הודפסו ב-24 השעות האחרונות — לחץ לפרטים בטאב "ניהול"';
+      banner.classList.remove('hidden');
+    } else {
+      banner.classList.add('hidden');
+    }
   } catch (err) {
     document.getElementById('statusSummary').textContent = '';
   }
 }
+document.getElementById('printFailuresBanner').addEventListener('click', () => {
+  document.querySelector('.tab[data-tab="admin"]').click();
+});
 
 async function loadList(){
   const listEl = document.getElementById('ordersList');
@@ -582,7 +593,8 @@ function renderEdit(data){
       container.innerHTML = data.log.map(entry => {
         const when = new Date(entry.created_at).toLocaleString('he-IL');
         const label = LOG_ACTION_LABELS[entry.action] || entry.action;
-        return '<div style="font-size:12px;"><b>' + esc(label) + '</b> · ' + esc(when) + (entry.detail ? ' · ' + esc(entry.detail) : '') + '</div>';
+        const color = LOG_ERROR_ACTIONS.has(entry.action) ? 'var(--danger)' : 'inherit';
+        return '<div style="font-size:12px;"><b style="color:' + color + ';">' + esc(label) + '</b> · ' + esc(when) + (entry.detail ? ' · ' + esc(entry.detail) : '') + '</div>';
       }).join('') || '<div style="color:var(--text-muted);font-size:12px;">אין היסטוריה עדיין</div>';
     } catch (err) {
       container.innerHTML = '<div style="color:var(--danger);font-size:12px;">שגיאה: ' + esc(err.message) + '</div>';
@@ -948,7 +960,9 @@ const LOG_ACTION_LABELS = {
   picked_up: 'נאסף ע"י הספק', returned: 'הוחזר מהספק',
   customer_notified: 'עודכן ללקוח', customer_collected: 'נאסף ע"י לקוח',
   customer_linked: 'דווח מספר לקוח', manual_fix: 'תיקון ידני', settings_changed: 'הגדרה עודכנה',
+  print_failed: '⚠️ הדפסת מדבקה נכשלה',
 };
+const LOG_ERROR_ACTIONS = new Set(['print_failed']);
 async function loadActivityLog(){
   const listEl = document.getElementById('activityLogList');
   listEl.innerHTML = '<div style="color:var(--text-muted);padding:10px;">טוען…</div>';
@@ -962,8 +976,9 @@ async function loadActivityLog(){
     listEl.innerHTML = data.log.map(entry => {
       const when = new Date(entry.created_at).toLocaleString('he-IL');
       const label = LOG_ACTION_LABELS[entry.action] || entry.action;
+      const color = LOG_ERROR_ACTIONS.has(entry.action) ? 'var(--danger)' : 'inherit';
       const ref = [entry.bag_code, entry.order_number ? 'הזמנה #' + entry.order_number : null].filter(Boolean).join(' · ');
-      return '<div class="bag-row" style="cursor:default;"><div><div class="who">' + esc(label) + (ref ? ' — ' + esc(ref) : '') + '</div>' +
+      return '<div class="bag-row" style="cursor:default;"><div><div class="who" style="color:' + color + ';">' + esc(label) + (ref ? ' — ' + esc(ref) : '') + '</div>' +
         '<div class="sub">' + esc(when) + (entry.detail ? ' · ' + esc(entry.detail) : '') + '</div></div></div>';
     }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:20px;">אין פעולות עדיין</div>';
   } catch (err) {

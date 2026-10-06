@@ -67,9 +67,10 @@ function printBagLabel(order_number, customer, bag) {
     toHebrewDate(new Date()),
     `${ITEM_TYPE_LABELS[bag.item_type] || bag.item_type}${bag.quantity > 1 ? ` ×${bag.quantity}` : ""}`,
   ].join("\n");
-  enqueuePrint({ text, barcode: bag.bag_code, copies: 1 }).catch((e) =>
-    console.error("enqueuePrint failed", bag.bag_code, e.message)
-  );
+  enqueuePrint({ text, barcode: bag.bag_code, copies: 1 }).catch((e) => {
+    console.error("enqueuePrint failed", bag.bag_code, e.message);
+    logActivity(bag.bag_code, order_number, "print_failed", e.message);
+  });
 }
 
 // הזמנה "נעולה" לעריכה/מחיקה ברגע שאחת השקיות שלה כבר נכנסה למערכת הספק (כל סטטוס מלבד waiting_pickup) —
@@ -184,7 +185,14 @@ const BAG_STATUS_CONDITIONS = {
 router.get("/summary", asyncHandler(async (req, res) => {
   const { rows } = await pool.query("select status, count(*)::int as count from bags group by status");
   const counts = Object.fromEntries(rows.map((r) => [r.status, r.count]));
-  res.json({ waiting_pickup: counts.waiting_pickup || 0, with_supplier: counts.with_supplier || 0 });
+  const { rows: failRows } = await pool.query(
+    "select count(*)::int as count from activity_log where action = 'print_failed' and created_at > now() - interval '24 hours'"
+  );
+  res.json({
+    waiting_pickup: counts.waiting_pickup || 0,
+    with_supplier: counts.with_supplier || 0,
+    print_failures_24h: failRows[0]?.count || 0,
+  });
 }));
 
 // רשימת שקיות עם מסננים — למסך "כל ההזמנות" (סוג פריט, מספר איסוף, סטטוס, חיפוש חופשי)
