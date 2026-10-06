@@ -56,6 +56,7 @@
   .tab{flex:1;text-align:center;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--surface);cursor:pointer;font-weight:600;font-size:14px;}
   .tab.active{background:var(--accent);color:#fff;border-color:var(--accent);}
   .hidden{display:none !important;}
+  #statusSummary:empty{visibility:hidden;}
   .order-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px;border:1px solid var(--border);border-radius:11px;background:var(--surface);}
   .order-row .who{font-size:14px;font-weight:600;}
   .order-row .sub{font-size:12px;color:var(--text-muted);margin-top:2px;}
@@ -79,6 +80,10 @@
   .badge.notified{background:#eef0fb;color:#3d4a9e;}
   .badge.collected{background:var(--ok-soft);color:var(--ok);}
   .mode-tabs{display:flex;gap:6px;}
+  .admin-nav{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+  @media (max-width:560px){.admin-nav{grid-template-columns:1fr 1fr;}}
+  .admin-nav-btn{padding:12px 6px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:13.5px;font-weight:600;cursor:pointer;}
+  .admin-nav-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
   .mode-tab{flex:1;text-align:center;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);cursor:pointer;font-size:12.5px;font-weight:600;color:var(--text-muted);}
   .mode-tab.active{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);}
   .scan-input{width:100%;padding:16px;font-size:20px;border:2px solid var(--accent);border-radius:12px;text-align:center;font-family:ui-monospace,monospace;background:var(--surface);color:var(--text);}
@@ -150,7 +155,6 @@
   </div>
 
   <div id="listPanel" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
-    <div id="statusSummary" style="font-size:13.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);border-radius:9px;padding:9px 12px;text-align:center;"></div>
     <div id="printFailuresBanner" class="hidden" style="font-size:13.5px;font-weight:600;color:#fff;background:var(--danger);border-radius:9px;padding:9px 12px;text-align:center;cursor:pointer;"></div>
     <div class="filters">
       <select id="filterItemType">
@@ -217,8 +221,9 @@
       <div class="log" id="actionLog"></div>
     </div>
 
-    <div style="display:flex;justify-content:space-between;align-items:center;">
-      <span style="font-size:13px;color:var(--text-muted);" id="listCount"></span>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+      <span style="font-size:13px;color:var(--text-muted);white-space:nowrap;" id="listCount"></span>
+      <div id="statusSummary" style="flex:1;font-size:12.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);border-radius:9px;padding:7px 10px;text-align:center;"></div>
       <button class="reload" id="reloadList">רענן</button>
     </div>
     <div id="ordersList" style="display:flex;flex-direction:column;gap:9px;"></div>
@@ -252,7 +257,13 @@
   </div>
 
   <div id="adminPanel" class="hidden" style="display:flex;flex-direction:column;gap:16px;">
-    <div class="card">
+    <div class="admin-nav">
+      <button type="button" class="admin-nav-btn" data-section="fix">🛠️ תיקון ידני</button>
+      <button type="button" class="admin-nav-btn" data-section="sms">📨 תבניות SMS</button>
+      <button type="button" class="admin-nav-btn" data-section="customers">👥 מאגר לקוחות</button>
+      <button type="button" class="admin-nav-btn" data-section="log">📋 יומן פעולות</button>
+    </div>
+    <div class="card admin-section hidden" data-section="fix">
       <b>תיקון ידני</b>
       <div class="sub" style="margin:0;">לתיקון טעויות בלבד — משנה סטטוס שקית ישירות, בלי לעבור דרך הזרימה הרגילה ובלי קשר לנעילה.</div>
       <div class="grid2">
@@ -275,7 +286,7 @@
       <div class="msg" id="fixMsg"></div>
     </div>
 
-    <div class="card">
+    <div class="card admin-section hidden" data-section="sms">
       <b>תבנית הודעת SMS ל"דיווח ללקוח"</b>
       <div class="sub" style="margin:0;"><code>{items}</code> יוחלף אוטומטית בסיכום הפריטים (למשל "2 מזוזות, תפילין זוג").</div>
       <textarea id="smsTemplate" rows="3"></textarea>
@@ -285,7 +296,7 @@
       <div class="msg" id="smsTemplateMsg"></div>
     </div>
 
-    <div class="card">
+    <div class="card admin-section hidden" data-section="customers">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <b>מאגר לקוחות</b>
         <button class="reload" id="reloadCustomers">רענן</button>
@@ -295,7 +306,7 @@
       <div id="customersList" style="display:flex;flex-direction:column;gap:7px;max-height:55vh;overflow-y:auto;"></div>
     </div>
 
-    <div class="card">
+    <div class="card admin-section hidden" data-section="log">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <b>יומן פעולות</b>
         <button class="reload" id="reloadLog">רענן</button>
@@ -443,7 +454,7 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   document.getElementById('adminPanel').classList.toggle('hidden', tab !== 'admin');
   if (tab !== 'list') cancelQuickAction();
   if (tab === 'list') { loadList(); loadSummary(); }
-  if (tab === 'admin') { loadActivityLog(); loadSettings(); loadCustomers(); }
+  if (tab === 'admin') showAdminSection(currentAdminSection);
 }));
 
 const ITEM_LABELS = {
@@ -480,6 +491,7 @@ async function loadSummary(){
   }
 }
 document.getElementById('printFailuresBanner').addEventListener('click', () => {
+  currentAdminSection = 'log';
   document.querySelector('.tab[data-tab="admin"]').click();
 });
 
@@ -618,26 +630,63 @@ function renderEdit(data){
     }
   }));
 
-  document.querySelectorAll('.editHistory').forEach(btn => btn.addEventListener('click', async () => {
-    const code = btn.dataset.code;
-    const container = document.getElementById('history-' + code);
+  document.querySelectorAll('.editHistory').forEach(btn => btn.addEventListener('click', () => {
+    const container = document.getElementById('history-' + btn.dataset.code);
     if (!container.classList.contains('hidden')) { container.classList.add('hidden'); return; }
     container.classList.remove('hidden');
-    container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">טוען…</div>';
-    try {
-      const res = await fetch(API_BASE + '/api/orders/activity-log?bag_code=' + encodeURIComponent(code));
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'שגיאה');
-      container.innerHTML = data.log.map(entry => {
-        const when = new Date(entry.created_at).toLocaleString('he-IL');
-        const label = LOG_ACTION_LABELS[entry.action] || entry.action;
-        const color = LOG_ERROR_ACTIONS.has(entry.action) ? 'var(--danger)' : 'inherit';
-        return '<div style="font-size:12px;"><b style="color:' + color + ';">' + esc(label) + '</b> · ' + esc(when) + (entry.detail ? ' · ' + esc(entry.detail) : '') + '</div>';
-      }).join('') || '<div style="color:var(--text-muted);font-size:12px;">אין היסטוריה עדיין</div>';
-    } catch (err) {
-      container.innerHTML = '<div style="color:var(--danger);font-size:12px;">שגיאה: ' + esc(err.message) + '</div>';
-    }
+    loadBagHistory(btn.dataset.code);
   }));
+}
+
+// היסטוריית שקית במסך העריכה. כל שורה ניתנת למחיקה — שורה של פעולה שמשנה מצב (איסוף/החזרה/עדכון/
+// איסוף לקוח/תיקון ידני) מחזירה את השקית למצב שלפניה (ראו DELETE /api/orders/activity-log/:id).
+const STATE_LOG_ACTIONS = new Set(['picked_up', 'returned', 'customer_notified', 'customer_collected', 'manual_fix']);
+async function loadBagHistory(code){
+  const container = document.getElementById('history-' + code);
+  container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">טוען…</div>';
+  try {
+    const res = await fetch(API_BASE + '/api/orders/activity-log?bag_code=' + encodeURIComponent(code));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה');
+    container.innerHTML = data.log.map(entry => {
+      const label = LOG_ACTION_LABELS[entry.action] || entry.action;
+      const color = LOG_ERROR_ACTIONS.has(entry.action) ? 'var(--danger)' : 'inherit';
+      return '<div style="font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
+        '<div><b style="color:' + color + ';">' + esc(label) + '</b> · ' + logWhenHtml(entry) + (entry.detail ? ' · ' + esc(entry.detail) : '') + '</div>' +
+        '<button type="button" class="historyDel" data-id="' + entry.id + '" data-action="' + esc(entry.action) + '" data-label="' + esc(label) + '" title="מחק שורה" ' +
+        'style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:7px;padding:3px 7px;cursor:pointer;color:var(--danger);font-size:12px;">🗑</button>' +
+        '</div>';
+    }).join('') || '<div style="color:var(--text-muted);font-size:12px;">אין היסטוריה עדיין</div>';
+    container.querySelectorAll('.historyDel').forEach(b => b.addEventListener('click', () => deleteHistoryRow(code, b.dataset)));
+  } catch (err) {
+    container.innerHTML = '<div style="color:var(--danger);font-size:12px;">שגיאה: ' + esc(err.message) + '</div>';
+  }
+}
+
+async function deleteHistoryRow(code, { id, action, label }){
+  const isState = STATE_LOG_ACTIONS.has(action);
+  if (!confirm('למחוק את השורה "' + label + '"?' + (isState ? '\nהשקית תחזור למצב שהיה לפני הפעולה הזו.' : ''))) return;
+  const call = (params) => fetch(API_BASE + '/api/orders/activity-log/' + encodeURIComponent(id) + (params ? '?' + params : ''), { method: 'DELETE' })
+    .then(async r => ({ status: r.status, data: await r.json() }));
+  try {
+    let { status, data } = await call('');
+    if (status === 409 && data.needs_confirm) {
+      const list = data.later.map(l => '• ' + l.label + ' (' + new Date(l.created_at).toLocaleString('he-IL') + ')').join('\n');
+      if (!confirm('אחרי השורה הזו יש עוד פעולות על השקית, והן יבוטלו גם:\n' + list + '\n\nלהמשיך?')) return;
+      ({ status, data } = await call('confirm_later=1'));
+    }
+    if (status === 409 && data.no_prev_state) {
+      if (!confirm(data.error + '\n\nלמחוק רק את השורה?')) return;
+      ({ status, data } = await call('log_only=1'));
+    }
+    if (status >= 400) throw new Error(data.error || 'שגיאה');
+    // הסטטוס של השקית אולי השתנה — טוענים מחדש את מסך ההזמנה ופותחים שוב את ההיסטוריה
+    await openEdit(editOrderNumber);
+    const container = document.getElementById('history-' + code);
+    if (container) { container.classList.remove('hidden'); loadBagHistory(code); }
+  } catch (err) {
+    alert(err.message);
+  }
 }
 
 document.getElementById('editBack').addEventListener('click', () => {
@@ -1065,6 +1114,14 @@ const LOG_ACTION_LABELS = {
   print_failed: '⚠️ הדפסת מדבקה נכשלה',
 };
 const LOG_ERROR_ACTIONS = new Set(['print_failed']);
+LOG_ACTION_LABELS.log_entry_deleted = '🗑 שורה נמחקה מההיסטוריה';
+// תאריך עברי קודם, ואחריו בקטן ובסוגריים תאריך לועזי ושעה
+function logWhenHtml(entry){
+  const d = new Date(entry.created_at);
+  const greg = d.toLocaleDateString('he-IL') + ' ' + d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+  return (entry.created_at_hebrew ? esc(entry.created_at_hebrew) + ' ' : '') +
+    '<span style="font-size:0.85em;color:var(--text-muted);">(' + esc(greg) + ')</span>';
+}
 async function loadActivityLog(){
   const listEl = document.getElementById('activityLogList');
   listEl.innerHTML = '<div style="color:var(--text-muted);padding:10px;">טוען…</div>';
@@ -1076,12 +1133,11 @@ async function loadActivityLog(){
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'שגיאה');
     listEl.innerHTML = data.log.map(entry => {
-      const when = new Date(entry.created_at).toLocaleString('he-IL');
       const label = LOG_ACTION_LABELS[entry.action] || entry.action;
       const color = LOG_ERROR_ACTIONS.has(entry.action) ? 'var(--danger)' : 'inherit';
       const ref = [entry.bag_code, entry.order_number ? 'הזמנה #' + entry.order_number : null].filter(Boolean).join(' · ');
       return '<div class="bag-row" style="cursor:default;"><div><div class="who" style="color:' + color + ';">' + esc(label) + (ref ? ' — ' + esc(ref) : '') + '</div>' +
-        '<div class="sub">' + esc(when) + (entry.detail ? ' · ' + esc(entry.detail) : '') + '</div></div></div>';
+        '<div class="sub">' + logWhenHtml(entry) + (entry.detail ? ' · ' + esc(entry.detail) : '') + '</div></div></div>';
     }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:20px;">אין פעולות עדיין</div>';
   } catch (err) {
     listEl.innerHTML = '<div style="color:var(--danger);padding:10px;">שגיאה: ' + esc(err.message) + '</div>';
@@ -1130,6 +1186,16 @@ document.getElementById('customerSearch').addEventListener('input', () => {
   clearTimeout(window._customerSearchDebounce);
   window._customerSearchDebounce = setTimeout(loadCustomers, 400);
 });
+// --- ניהול: 4 כפתורים בראש הדף, כל אחד מציג את החלק שלו (ברירת מחדל: יומן פעולות) ---
+let currentAdminSection = 'log';
+const ADMIN_SECTION_LOADERS = { fix: () => {}, sms: () => loadSettings(), customers: () => loadCustomers(), log: () => loadActivityLog() };
+function showAdminSection(section){
+  currentAdminSection = section;
+  document.querySelectorAll('.admin-nav-btn').forEach(b => b.classList.toggle('active', b.dataset.section === section));
+  document.querySelectorAll('.admin-section').forEach(c => c.classList.toggle('hidden', c.dataset.section !== section));
+  ADMIN_SECTION_LOADERS[section]();
+}
+document.querySelectorAll('.admin-nav-btn').forEach(b => b.addEventListener('click', () => showAdminSection(b.dataset.section)));
 </script>
 </body>
 </html>

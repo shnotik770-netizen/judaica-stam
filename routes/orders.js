@@ -4,7 +4,7 @@ import { asyncHandler } from "../lib/asyncHandler.js";
 import { enqueuePrint } from "../lib/printQueue.js";
 import { toHebrewDate } from "../lib/hebrewDate.js";
 import { sendSms } from "../lib/call2all.js";
-import { logActivity } from "../lib/activityLog.js";
+import { logActivity, snapshotBagStates, BAG_STATE_FIELDS } from "../lib/activityLog.js";
 import { getSetting, setSetting } from "../lib/settings.js";
 
 export const router = express.Router();
@@ -341,6 +341,7 @@ router.post("/scan", asyncHandler(async (req, res) => {
         }
       }
 
+      const prevStates = await snapshotBagStates(group.map((g) => g.bag_code));
       await pool.query(
         "update bags set customer_notified_at = now(), updated_at = now() where id = any($1)",
         [group.map((g) => g.id)]
@@ -348,7 +349,7 @@ router.post("/scan", asyncHandler(async (req, res) => {
       const groupNote = group.length > 1 ? ` · קובצו ${group.length} שקיות של אותו טלפון` : "";
       const repeatNote = isRepeat ? " · דיווח חוזר" : "";
       for (const g of group) {
-        logActivity(g.bag_code, g.order_number, "customer_notified", (action === "notify_sms" ? "SMS" : "ידני") + groupNote + repeatNote);
+        logActivity(g.bag_code, g.order_number, "customer_notified", (action === "notify_sms" ? "SMS" : "ידני") + groupNote + repeatNote, prevStates.get(g.bag_code));
       }
       results.push({
         bag_code: code, ok: true, action: "notified", order_number: bag.order_number, customer,
@@ -362,8 +363,9 @@ router.post("/scan", asyncHandler(async (req, res) => {
       results.push({ bag_code: code, ok: true, action: "duplicate", order_number: bag.order_number, customer });
       continue;
     }
+    const prevCollect = (await snapshotBagStates([bag.bag_code])).get(bag.bag_code);
     await pool.query("update bags set customer_collected_at = now(), updated_at = now() where id = $1", [bag.id]);
-    logActivity(bag.bag_code, bag.order_number, "customer_collected", null);
+    logActivity(bag.bag_code, bag.order_number, "customer_collected", null, prevCollect);
     results.push({ bag_code: code, ok: true, action: "collected", order_number: bag.order_number, customer });
   }
 
@@ -390,23 +392,131 @@ router.put("/settings", asyncHandler(async (req, res) => {
 // bag_code (התאמה מדויקת) — להיסטוריה המלאה של שקית ספציפית (מסך העריכה). q (חיפוש חכם) —
 // מסנן גם לפי קוד שקית/מספר הזמנה וגם לפי שם/טלפון הלקוח (דרך join ל-bags/orders/customers,
 // כי activity_log עצמה לא שומרת פרטי לקוח) — לתיבת החיפוש בטאב "ניהול".
+const withHebrewDates = (rows) => rows.map((r) => ({ ...r, created_at_hebrew: toHebrewDate(r.created_at) }));
+
+// פעולות שמשנות את מצב השקית — מחיקה שלהן מההיסטוריה מחזירה את השקית למצב שלפניהן.
+// (השוואות זמן נעשות ב-SQL מול השורה עצמה: Date של JS מאבד את המיקרו-שניות של timestamptz.)
+const STATE_ACTIONS = ["picked_up", "returned", "customer_notified", "customer_collected", "manual_fix"];
+const STATE_ACTION_LABELS = {
+  picked_up: "נאסף ע\"י הספק", returned: "הוחזר מהספק", customer_notified: "עודכן ללקוח",
+  customer_collected: "נאסף ע\"י לקוח", manual_fix: "תיקון ידני",
+  label_reprinted: "מדבקה הודפסה שוב", print_failed: "הדפסה נכשלה", bag_added: "שקית נוספה",
+};
+
+// לשורות שנרשמו לפני שהתחלנו לשמור prev_state — שחזור המצב הקודם לפי סוג הפעולה. לתיקון ידני ישן אין
+// דרך לדעת מה היה קודם (null = לא ניתן לשחזר).
+async function derivePrevState(client, row) {
+  switch (row.action) {
+    case "picked_up":
+      return { status: "waiting_pickup", collection_id: null, picked_up_at: null, imported_at: null };
+    case "returned":
+      return { status: "with_supplier", returned_at: null, result: null, customer_notified_at: null, customer_collected_at: null };
+    case "customer_notified": {
+      const { rows } = await client.query(
+        `select created_at from activity_log where bag_code = $1 and action = 'customer_notified' and id <> $2
+           and created_at < (select created_at from activity_log where id = $2)
+         order by created_at desc limit 1`,
+        [row.bag_code, row.id]
+      );
+      return { customer_notified_at: rows[0]?.created_at || null };
+    }
+    case "customer_collected":
+      return { customer_collected_at: null };
+    default:
+      return null;
+  }
+}
+
+// מחיקת שורה מהיסטוריית שקית. שורה של פעולה שמשנה מצב (STATE_ACTIONS) גם מחזירה את השקית למצב שלפניה.
+// אם אחריה יש עוד פעולות מצב על אותה שקית, הן מבוטלות גם (אחרת המצב לא יהיה עקבי) — לכן בלי
+// ?confirm_later=1 מחזירים 409 עם רשימתן, וה-UI מבקש אישור. ?log_only=1 — מחיקת השורה בלבד בלי שינוי השקית
+// (לשורה ישנה שאין לה מצב קודם שמור). כל מחיקה נרשמת ביומן (log_entry_deleted).
+router.delete("/activity-log/:id", asyncHandler(async (req, res) => {
+  const confirmLater = req.query.confirm_later === "1";
+  const logOnly = req.query.log_only === "1";
+  const client = await pool.connect();
+  let row, later = [], reverted = false;
+  try {
+    await client.query("begin");
+    const found = await client.query("select * from activity_log where id = $1 for update", [req.params.id]);
+    row = found.rows[0];
+    if (!row) {
+      await client.query("rollback");
+      res.status(404).json({ error: "השורה לא נמצאה (אולי כבר נמחקה)" });
+      return;
+    }
+    const isState = row.bag_code && STATE_ACTIONS.includes(row.action) && !logOnly;
+    if (isState) {
+      const laterRes = await client.query(
+        `select id, action, created_at from activity_log
+         where bag_code = $1 and action = any($2) and id <> $3
+           and created_at > (select created_at from activity_log where id = $3)
+         order by created_at`,
+        [row.bag_code, STATE_ACTIONS, row.id]
+      );
+      later = laterRes.rows;
+      if (later.length && !confirmLater) {
+        await client.query("rollback");
+        res.status(409).json({
+          needs_confirm: true,
+          error: "יש פעולות מאוחרות יותר על השקית שיבוטלו גם",
+          later: later.map((l) => ({ action: l.action, label: STATE_ACTION_LABELS[l.action] || l.action, created_at: l.created_at })),
+        });
+        return;
+      }
+      const prev = row.prev_state || (await derivePrevState(client, row));
+      if (!prev) {
+        await client.query("rollback");
+        res.status(409).json({
+          no_prev_state: true,
+          error: "לשורה הזו לא נשמר המצב הקודם של השקית (נרשמה לפני שהתחלנו לשמור אותו) — אפשר למחוק רק את השורה, ולתקן את הסטטוס ידנית בטאב \"ניהול\"",
+        });
+        return;
+      }
+      const keys = BAG_STATE_FIELDS.filter((k) => k in prev);
+      if (keys.length) {
+        const values = keys.map((k) => (k === "result" && prev[k] != null ? JSON.stringify(prev[k]) : prev[k]));
+        await client.query(
+          `update bags set ${keys.map((k, i) => `${k} = $${i + 2}`).join(", ")}, updated_at = now() where bag_code = $1`,
+          [row.bag_code, ...values]
+        );
+      }
+      reverted = true;
+    }
+    await client.query("delete from activity_log where id = any($1)", [[row.id, ...later.map((l) => l.id)]]);
+    await client.query("commit");
+  } catch (e) {
+    await client.query("rollback");
+    throw e;
+  } finally {
+    client.release();
+  }
+  const label = STATE_ACTION_LABELS[row.action] || row.action;
+  logActivity(row.bag_code, row.order_number, "log_entry_deleted",
+    `${label} מ-${new Date(row.created_at).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" })}` +
+    (later.length ? ` + ${later.length} פעולות מאוחרות` : "") + (reverted ? " · השקית הוחזרה למצב הקודם" : ""));
+  res.json({ ok: true, reverted, removed_later: later.length });
+}));
+
 router.get("/activity-log", asyncHandler(async (req, res) => {
   const limit = Math.min(+req.query.limit || 100, 500);
   const bagCode = (req.query.bag_code || "").trim();
   const q = (req.query.q || "").trim();
 
+  // היסטוריית שקית — בלי רשומות "שורה נמחקה" (הן מופיעות רק ביומן הכללי, כדי לא להעמיס על ההיסטוריה)
   if (bagCode) {
     const { rows } = await pool.query(
-      "select bag_code, order_number, action, detail, created_at from activity_log where bag_code = $1 order by created_at desc limit $2",
+      `select id, bag_code, order_number, action, detail, created_at from activity_log
+       where bag_code = $1 and action <> 'log_entry_deleted' order by created_at desc limit $2`,
       [bagCode, limit]
     );
-    res.json({ log: rows });
+    res.json({ log: withHebrewDates(rows) });
     return;
   }
 
   if (q) {
     const { rows } = await pool.query(
-      `select al.bag_code, al.order_number, al.action, al.detail, al.created_at
+      `select al.id, al.bag_code, al.order_number, al.action, al.detail, al.created_at
        from activity_log al
        left join bags b on b.bag_code = al.bag_code
        left join orders ob on ob.id = b.order_id
@@ -417,15 +527,15 @@ router.get("/activity-log", asyncHandler(async (req, res) => {
        order by al.created_at desc limit $2`,
       [`%${q}%`, limit]
     );
-    res.json({ log: rows });
+    res.json({ log: withHebrewDates(rows) });
     return;
   }
 
   const { rows } = await pool.query(
-    "select bag_code, order_number, action, detail, created_at from activity_log order by created_at desc limit $1",
+    "select id, bag_code, order_number, action, detail, created_at from activity_log order by created_at desc limit $1",
     [limit]
   );
-  res.json({ log: rows });
+  res.json({ log: withHebrewDates(rows) });
 }));
 
 // מאגר לקוחות — לטאב "ניהול". q = חיפוש חופשי (שם פרטי/משפחה/טלפון/כתובת), כולל סיכום הזמנות/שקיות לכל לקוח.
@@ -632,6 +742,7 @@ router.put("/bags/:bag_code/force-status", asyncHandler(async (req, res) => {
   const params = [status, req.params.bag_code];
   if (reset_notified) sets.push("customer_notified_at=null");
   if (reset_collected) sets.push("customer_collected_at=null");
+  const prevFix = (await snapshotBagStates([req.params.bag_code])).get(req.params.bag_code);
   const { rows } = await pool.query(
     `update bags set ${sets.join(", ")} where bag_code=$2 returning bag_code, status`,
     params
@@ -640,7 +751,7 @@ router.put("/bags/:bag_code/force-status", asyncHandler(async (req, res) => {
     res.status(404).json({ error: "קוד לא מוכר" });
     return;
   }
-  logActivity(req.params.bag_code, null, "manual_fix", `status=${status}`);
+  logActivity(req.params.bag_code, null, "manual_fix", `status=${status}`, prevFix);
   res.json(rows[0]);
 }));
 

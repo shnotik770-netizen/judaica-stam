@@ -1,7 +1,7 @@
 import express from "express";
 import { pool } from "../lib/db.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
-import { logActivity } from "../lib/activityLog.js";
+import { logActivity, snapshotBagStates } from "../lib/activityLog.js";
 
 export const router = express.Router();
 // ללא אימות בכוונה — החלטת המשתמש: מיכאל אמור להיות מחובר תמיד בלי להזין מפתח כדי לעבוד.
@@ -100,6 +100,7 @@ router.get("/bag/:code", asyncHandler(async (req, res) => {
 
 // מבצע בפועל מסירה (איסוף) — פתוח/הצטרפות ל"איסוף" + עדכון השקית, בטרנזקציה אחת.
 async function pickupBag(bag) {
+  const prev = (await snapshotBagStates([bag.bag_code])).get(bag.bag_code);
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -116,16 +117,17 @@ async function pickupBag(bag) {
   } finally {
     client.release();
   }
-  logActivity(bag.bag_code, bag.order_number, "picked_up", null);
+  logActivity(bag.bag_code, bag.order_number, "picked_up", null, prev);
 }
 
 // מבצע בפועל החזרה
 async function returnBag(bag, result) {
+  const prev = (await snapshotBagStates([bag.bag_code])).get(bag.bag_code);
   await pool.query(
     `update bags set status='returned', returned_at=now(), result=$2, updated_at=now() where id=$1`,
     [bag.id, result ? JSON.stringify(result) : null]
   );
-  logActivity(bag.bag_code, bag.order_number, "returned", result ? JSON.stringify(result) : null);
+  logActivity(bag.bag_code, bag.order_number, "returned", result ? JSON.stringify(result) : null, prev);
 }
 
 // עדכון סטטוס — מזהה לבד אם זו מסירה (איסוף) או החזרה, לפי מצב השקית הנוכחי. לסריקה בודדת

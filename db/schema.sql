@@ -84,6 +84,10 @@ create table if not exists activity_log (
   created_at timestamptz not null default now()
 );
 create index if not exists idx_activity_log_created on activity_log(created_at desc);
+-- מצב השקית *לפני* הפעולה (רק לפעולות שמשנות מצב: איסוף/החזרה/עדכון/איסוף לקוח/תיקון ידני) — כדי
+-- שמחיקת שורה מההיסטוריה תחזיר את השקית למצב הקודם. שורות ישנות בלי זה — ראו derivePrevState ב-routes/orders.js.
+alter table activity_log add column if not exists prev_state jsonb;
+create index if not exists idx_activity_log_bag on activity_log(bag_code, created_at);
 
 -- הגדרות כלליות (key/value) — כרגע רק תבנית הודעת ה-SMS ל"דיווח ללקוח", ניתנת לעריכה במסך "ניהול"
 -- בלי לדרוש דיפלוי קוד. {items} בתבנית מוחלף בסיכום הפריטים (ראו routes/orders.js).
