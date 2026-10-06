@@ -336,7 +336,13 @@ router.post("/scan", asyncHandler(async (req, res) => {
         try {
           await sendSms(bag.phone, message);
         } catch (e) {
-          results.push({ bag_code: code, ok: false, error: "שליחת SMS נכשלה: " + e.message });
+          // ה-UI מציג על זה התראה קבועה עד שסוגרים אותה — לכן מחזירים את פרטי השקית/הלקוח/הקבוצה
+          logActivity(bag.bag_code, bag.order_number, "sms_failed", e.message);
+          results.push({
+            bag_code: code, ok: false, sms_failed: true, error: "שליחת SMS נכשלה: " + e.message,
+            order_number: bag.order_number, item_type: bag.item_type, quantity: bag.quantity, customer,
+            grouped_bag_codes: group.map((g) => g.bag_code),
+          });
           continue;
         }
       }

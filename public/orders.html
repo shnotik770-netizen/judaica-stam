@@ -124,6 +124,13 @@
   .scan-flash.warn{background:var(--danger);}
   .scan-flash.show{transform:translateY(0);}
   .scan-flash .code{font-family:ui-monospace,monospace;font-weight:800;font-size:15px;}
+  /* התראות קבועות על SMS שלא נשלח — נשארות (גם אחרי רענון, באותו מכשיר) עד שסוגרים אותן ב-✕ */
+  #smsAlerts{position:sticky;top:0;z-index:50;display:flex;flex-direction:column;gap:6px;}
+  .sms-alert{display:flex;align-items:flex-start;gap:10px;background:var(--danger-soft);color:var(--danger);border:1px solid var(--danger);border-radius:10px;padding:9px 12px;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.08);}
+  .sms-alert .t{flex:1;}
+  .sms-alert .t b{display:block;font-size:13.5px;}
+  .sms-alert .d{font-size:11.5px;opacity:.85;margin-top:2px;}
+  .sms-alert button{flex-shrink:0;background:none;border:none;color:var(--danger);font-size:18px;line-height:1;cursor:pointer;padding:0 2px;}
 </style>
 </head>
 <body>
@@ -135,6 +142,8 @@
       <a class="link-out" href="/supplier.html" target="_blank">↗ דף האיסוף (מיכאל)</a>
     </div>
   </div>
+
+  <div id="smsAlerts" class="hidden"></div>
 
   <div class="tabs">
     <div class="tab active" data-tab="new">הזמנה חדשה</div>
@@ -885,7 +894,12 @@ async function applyQuickAction(codes, force){
       beep(220, 0.3);
     } else {
       for (const r of (data.results || [])) {
-        if (!r.ok) { addActionLog('warn', r.bag_code, r.error || 'שגיאה'); flashScan('warn', r.bag_code, '', r.error || 'שגיאה'); continue; }
+        if (!r.ok) {
+          addActionLog('warn', r.bag_code, r.error || 'שגיאה');
+          flashScan('warn', r.bag_code, '', r.error || 'שגיאה');
+          if (r.sms_failed) addSmsAlert(r);
+          continue;
+        }
         const who = r.customer.first_name + ' ' + r.customer.last_name;
         const item = itemText(r.item_type, r.quantity);
         if (r.action === 'notified') {
@@ -1156,9 +1170,9 @@ const LOG_ACTION_LABELS = {
   picked_up: 'נאסף ע"י הספק', returned: 'הוחזר מהספק',
   customer_notified: 'עודכן ללקוח', customer_collected: 'נאסף ע"י לקוח',
   customer_linked: 'דווח מספר לקוח', manual_fix: 'תיקון ידני', settings_changed: 'הגדרה עודכנה',
-  print_failed: '⚠️ הדפסת מדבקה נכשלה',
+  print_failed: '⚠️ הדפסת מדבקה נכשלה', sms_failed: '⚠️ SMS ללקוח לא נשלח',
 };
-const LOG_ERROR_ACTIONS = new Set(['print_failed']);
+const LOG_ERROR_ACTIONS = new Set(['print_failed', 'sms_failed']);
 LOG_ACTION_LABELS.log_entry_deleted = '🗑 שורה נמחקה מההיסטוריה';
 // תאריך עברי קודם, ואחריו בקטן ובסוגריים תאריך לועזי ושעה
 function logWhenHtml(entry){
@@ -1241,6 +1255,41 @@ function showAdminSection(section){
   ADMIN_SECTION_LOADERS[section]();
 }
 document.querySelectorAll('.admin-nav-btn').forEach(b => b.addEventListener('click', () => showAdminSection(b.dataset.section)));
+// --- התראות על SMS שלא נשלח בדיווח ללקוח: נשארות בראש הדף עד שסוגרים (✕). נשמרות ב-localStorage
+// של המכשיר כדי לשרוד רענון; אם האחסון חסום — פשוט חיות עד רענון. הכישלון נרשם גם ביומן (sms_failed).
+const SMS_ALERTS_KEY = 'smsFailedAlerts';
+let smsAlerts = [];
+try { smsAlerts = JSON.parse(localStorage.getItem(SMS_ALERTS_KEY) || '[]'); } catch (e) { smsAlerts = []; }
+function saveSmsAlerts(){ try { localStorage.setItem(SMS_ALERTS_KEY, JSON.stringify(smsAlerts)); } catch (e) {} }
+function renderSmsAlerts(){
+  const box = document.getElementById('smsAlerts');
+  box.classList.toggle('hidden', smsAlerts.length === 0);
+  box.innerHTML = smsAlerts.map((a, i) => {
+    const codes = a.codes.length > 1 ? 'שקיות ' + a.codes.join(', ') : 'שקית ' + a.codes[0];
+    return '<div class="sms-alert"><div class="t"><b>⚠️ ' + esc(codes) + ' — הלקוח לא עודכן, ה-SMS לא נשלח</b>' +
+      '<div class="d">' + [a.who, a.phone, a.item, a.error, new Date(a.at).toLocaleString('he-IL')].filter(Boolean).map(esc).join(' · ') + '</div></div>' +
+      '<button type="button" data-i="' + i + '" title="סגור" aria-label="סגור התראה">✕</button></div>';
+  }).join('');
+  box.querySelectorAll('button[data-i]').forEach(b => b.addEventListener('click', () => {
+    smsAlerts.splice(+b.dataset.i, 1);
+    saveSmsAlerts();
+    renderSmsAlerts();
+  }));
+}
+function addSmsAlert(r){
+  const codes = (r.grouped_bag_codes && r.grouped_bag_codes.length) ? r.grouped_bag_codes : [r.bag_code];
+  smsAlerts.unshift({
+    codes,
+    who: r.customer ? r.customer.first_name + ' ' + r.customer.last_name : '',
+    phone: r.customer ? r.customer.phone : '',
+    item: codes.length > 1 ? '' : itemText(r.item_type, r.quantity), // בקבוצה — הפריט של השקית הסרוקה בלבד יטעה
+    error: (r.error || '').replace(/^שליחת SMS נכשלה:\s*/, ''),
+    at: Date.now(),
+  });
+  saveSmsAlerts();
+  renderSmsAlerts();
+}
+renderSmsAlerts();
 </script>
 </body>
 </html>
