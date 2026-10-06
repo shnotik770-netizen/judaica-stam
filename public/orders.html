@@ -182,15 +182,6 @@
     </div>
   </div>
 
-  <div id="quickActionActive" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
-    <div class="purpose-bar qa-hide">
-      <span id="quickActionLabel"></span>
-      <div style="display:flex;gap:6px;">
-        <button type="button" id="quickScanToggle">📷 סריקה מהירה</button>
-        <button type="button" id="quickActionCancel">בטל</button>
-      </div>
-    </div>
-
   <div class="tabs">
     <div class="tab active" data-tab="new">הזמנה חדשה</div>
     <div class="tab" data-tab="list">כל ההזמנות</div>
@@ -206,8 +197,8 @@
       <div class="field"><label>שם משפחה</label><input required id="lastName"></div>
     </div>
     <div class="grid2">
-      <div class="field"><label>טלפון</label><input required id="phone"></div>
-      <div class="field"><label>כתובת</label><input required id="address"></div>
+      <div class="field"><label>טלפון</label><input required id="phone" type="tel" inputmode="numeric" autocomplete="tel"></div>
+      <div class="field"><label>כתובת</label><input id="address" placeholder="לא חובה"></div>
     </div>
     <div class="suggest hidden" id="customerSuggest"></div>
 
@@ -246,6 +237,15 @@
       <input id="filterCollection" type="number" placeholder="מספר איסוף">
     </div>
     <input id="filterSearch" placeholder="חיפוש לפי שם / טלפון / מספר הזמנה…">
+
+    <div id="quickActionActive" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
+      <div class="purpose-bar qa-hide">
+        <span id="quickActionLabel"></span>
+        <div style="display:flex;gap:6px;">
+          <button type="button" id="quickScanToggle">📷 סריקה מהירה</button>
+          <button type="button" id="quickActionCancel">בטל</button>
+        </div>
+      </div>
 
       <div id="quickScanPanel" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
         <div class="mode-tabs qa-hide">
@@ -291,7 +291,7 @@
       <div class="field"><label>שם משפחה</label><input id="editLastName"></div>
     </div>
     <div class="grid2">
-      <div class="field"><label>טלפון</label><input id="editPhone"></div>
+      <div class="field"><label>טלפון</label><input id="editPhone" type="tel" inputmode="numeric" autocomplete="tel"></div>
       <div class="field"><label>כתובת</label><input id="editAddress"></div>
     </div>
 
@@ -460,6 +460,12 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
     quantity: +b.querySelector('.qty').value || 1,
   }));
   if (bags.length === 0) { msg.className = 'msg err'; msg.textContent = 'צריך לפחות שקית אחת.'; return; }
+  // כתובת לא חובה — מזהירים ומאפשרים להמשיך
+  if (!document.getElementById('address').value.trim() &&
+      !confirm('חסרה כתובת ללקוח. להמשיך וליצור את ההזמנה בלי כתובת?')) {
+    document.getElementById('address').focus();
+    return;
+  }
 
   const body = {
     customer: {

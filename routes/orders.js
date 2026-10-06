@@ -90,7 +90,7 @@ async function isOrderLocked(orderId) {
 router.post("/", asyncHandler(async (req, res) => {
   const { customer, bags } = req.body || {};
   if (!customer?.phone || !customer?.first_name || !customer?.last_name || !Array.isArray(bags) || bags.length === 0) {
-    res.status(400).json({ error: "customer (first_name, last_name, phone, address) ו-bags נדרשים" });
+    res.status(400).json({ error: "customer (first_name, last_name, phone) ו-bags נדרשים" });
     return;
   }
   for (const b of bags) {
@@ -109,14 +109,15 @@ router.post("/", asyncHandler(async (req, res) => {
     if (existing.rows.length > 0) {
       customerId = existing.rows[0].id;
       await client.query(
-        "update customers set first_name=$1, last_name=$2, address=$3 where id=$4",
-        [customer.first_name, customer.last_name, customer.address, customerId]
+        // כתובת לא חובה (הטופס מזהיר ומאפשר להמשיך) — כתובת ריקה לא מוחקת כתובת קיימת של לקוח מוכר
+        "update customers set first_name=$1, last_name=$2, address=coalesce(nullif($3, ''), address) where id=$4",
+        [customer.first_name, customer.last_name, (customer.address || "").trim(), customerId]
       );
     } else {
       const inserted = await client.query(
         `insert into customers (first_name, last_name, phone, address)
          values ($1,$2,$3,$4) returning id`,
-        [customer.first_name, customer.last_name, customer.phone, customer.address]
+        [customer.first_name, customer.last_name, customer.phone, (customer.address || "").trim()]
       );
       customerId = inserted.rows[0].id;
     }
@@ -617,7 +618,7 @@ router.get("/:order_number", asyncHandler(async (req, res) => {
 router.put("/:order_number", asyncHandler(async (req, res) => {
   const { customer, bags } = req.body || {};
   if (!customer?.phone || !customer?.first_name || !customer?.last_name) {
-    res.status(400).json({ error: "customer (first_name, last_name, phone, address) נדרש" });
+    res.status(400).json({ error: "customer (first_name, last_name, phone) נדרש" });
     return;
   }
   const o = await pool.query(
@@ -636,7 +637,7 @@ router.put("/:order_number", asyncHandler(async (req, res) => {
 
   await pool.query(
     "update customers set first_name=$1, last_name=$2, phone=$3, address=$4 where id=$5",
-    [customer.first_name, customer.last_name, customer.phone, customer.address, customerId]
+    [customer.first_name, customer.last_name, customer.phone, (customer.address || "").trim(), customerId]
   );
 
   for (const b of bags || []) {
