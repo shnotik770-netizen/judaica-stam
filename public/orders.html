@@ -848,10 +848,11 @@ async function startCamera(){
   });
   try {
     await html5Qr.start(
-      { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+      { facingMode: 'environment' },
       {
         fps: 15,
         qrbox: { width: 280, height: 140 },
+        videoConstraints: { width: { ideal: 1920 }, height: { ideal: 1080 } },
         experimentalFeatures: { useBarCodeDetectorIfSupported: true },
       },
       onCameraDecode,
