@@ -281,6 +281,16 @@
 
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;">
+        <b>מאגר לקוחות</b>
+        <button class="reload" id="reloadCustomers">רענן</button>
+      </div>
+      <input id="customerSearch" placeholder="חיפוש לפי שם / טלפון / כתובת (ריק = הכל)">
+      <div class="sub" style="margin:0;" id="customerCount"></div>
+      <div id="customersList" style="display:flex;flex-direction:column;gap:7px;max-height:55vh;overflow-y:auto;"></div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
         <b>יומן פעולות</b>
         <button class="reload" id="reloadLog">רענן</button>
       </div>
@@ -333,25 +343,34 @@ function addBag(){
 document.getElementById('addBag').onclick = addBag;
 addBag();
 
-// הצעת מספר לקוח אצל הספק אם הטלפון כבר ידוע אצלנו
+// לקוח קיים: כבר בזמן הקלדת הטלפון (מ-9 ספרות) — ממלא אוטומטית שם+כתובת ומציג מספר לקוח אצל הספק אם ידוע
 const phoneInput = document.getElementById('phone');
 const suggestEl = document.getElementById('customerSuggest');
-phoneInput.addEventListener('blur', async () => {
-  const phone = phoneInput.value.trim();
-  suggestEl.classList.add('hidden');
-  if (!phone) return;
+let lastLookupDigits = '';
+async function lookupCustomer(){
+  const digits = phoneInput.value.replace(/\D/g, '');
+  if (digits.length < 9) { lastLookupDigits = ''; suggestEl.classList.add('hidden'); return; }
+  if (digits === lastLookupDigits) return;
+  lastLookupDigits = digits;
   try {
-    const res = await fetch(API_BASE + '/api/orders/customer-lookup?phone=' + encodeURIComponent(phone));
+    const res = await fetch(API_BASE + '/api/orders/customer-lookup?phone=' + encodeURIComponent(digits));
     const data = await res.json();
-    if (data.found && data.supplier_customer_number) {
-      suggestEl.textContent = 'לקוח מוכר — מספר לקוח אצל הספק: ' + data.supplier_customer_number;
-      suggestEl.classList.remove('hidden');
-    } else if (data.found) {
-      suggestEl.textContent = 'לקוח מוכר אצלנו, עדיין אין מספר לקוח רשום אצל הספק.';
-      suggestEl.classList.remove('hidden');
-    }
+    if (phoneInput.value.replace(/\D/g, '') !== digits) return; // המשתמש המשיך להקליד בינתיים
+    if (!data.found) { suggestEl.classList.add('hidden'); return; }
+    document.getElementById('firstName').value = data.first_name || '';
+    document.getElementById('lastName').value = data.last_name || '';
+    document.getElementById('address').value = data.address || '';
+    phoneInput.value = data.phone; // בדיוק כפי שנשמר, כדי שיצירת ההזמנה תשויך לאותו לקוח
+    suggestEl.textContent = '✓ לקוח קיים: ' + data.first_name + ' ' + data.last_name + ' — הפרטים מולאו אוטומטית' +
+      (data.supplier_customer_number ? ' · מספר לקוח אצל הספק: ' + data.supplier_customer_number : '');
+    suggestEl.classList.remove('hidden');
   } catch (err) { /* לא קריטי, מתעלמים */ }
+}
+phoneInput.addEventListener('input', () => {
+  clearTimeout(window._phoneLookupDebounce);
+  window._phoneLookupDebounce = setTimeout(lookupCustomer, 350);
 });
+phoneInput.addEventListener('blur', lookupCustomer);
 
 document.getElementById('orderForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -406,7 +425,7 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   document.getElementById('adminPanel').classList.toggle('hidden', tab !== 'admin');
   if (tab !== 'list') cancelQuickAction();
   if (tab === 'list') { loadList(); loadSummary(); }
-  if (tab === 'admin') { loadActivityLog(); loadSettings(); }
+  if (tab === 'admin') { loadActivityLog(); loadSettings(); loadCustomers(); }
 }));
 
 const ITEM_LABELS = {
@@ -824,11 +843,21 @@ async function getCameraDevices(){
   if (!cameraDevices.length) {
     try { cameraDevices = await Html5Qrcode.getCameras(); } catch (e) { cameraDevices = []; }
     if (cameraDevices.length) {
-      const backIdx = cameraDevices.findIndex(c => /back|rear|environment/i.test(c.label || ''));
+      const backIdx = cameraDevices.findIndex(c => /back|rear|environment|אחורי/i.test(c.label || ''));
       currentCameraIndex = backIdx >= 0 ? backIdx : cameraDevices.length - 1;
     }
   }
   return cameraDevices;
+}
+
+// חשוב: ב-html5-qrcode, כש-config.videoConstraints מוגדר הוא *מחליף לגמרי* את הארגומנט הראשון של start()
+// (בחירת המצלמה) — כך שאם שמים בו רק רזולוציה, הדפדפן בוחר מצלמת ברירת מחדל (בד"כ הקדמית) וכפתור
+// "החלף מצלמה" לא משפיע. לכן בחירת המצלמה (deviceId / facingMode) חייבת להיות גם בתוך videoConstraints.
+function cameraVideoConstraints(cameras){
+  const select = cameras.length
+    ? { deviceId: { exact: cameras[currentCameraIndex].id } }
+    : { facingMode: { ideal: 'environment' } };
+  return { ...select, width: { ideal: 1920 }, height: { ideal: 1080 } };
 }
 
 async function onCameraDecode(decodedText){
@@ -883,7 +912,7 @@ async function startCamera(){
       {
         fps: 15,
         qrbox: { width: 280, height: 140 },
-        videoConstraints: { width: { ideal: 1920 }, height: { ideal: 1080 } },
+        videoConstraints: cameraVideoConstraints(cameras),
         experimentalFeatures: { useBarCodeDetectorIfSupported: true },
       },
       onCameraDecode,
@@ -1018,6 +1047,44 @@ document.getElementById('reloadLog').onclick = loadActivityLog;
 document.getElementById('logBagFilter').addEventListener('input', () => {
   clearTimeout(window._logFilterDebounce);
   window._logFilterDebounce = setTimeout(loadActivityLog, 400);
+});
+// --- ניהול: מאגר לקוחות. קליק על לקוח = מעבר ל"כל ההזמנות" מסונן לפי הטלפון שלו ---
+async function loadCustomers(){
+  const listEl = document.getElementById('customersList');
+  const countEl = document.getElementById('customerCount');
+  countEl.textContent = 'טוען…';
+  const q = document.getElementById('customerSearch').value.trim();
+  try {
+    const res = await fetch(API_BASE + '/api/orders/customers' + (q ? '?q=' + encodeURIComponent(q) : ''));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה');
+    countEl.textContent = data.customers.length + ' לקוחות';
+    listEl.innerHTML = data.customers.map(c => {
+      const last = c.last_order_at ? ' · הזמנה אחרונה ' + new Date(c.last_order_at).toLocaleDateString('he-IL') : '';
+      const supplierNo = c.supplier_customer_number ? ' · מס\' לקוח אצל הספק: ' + esc(c.supplier_customer_number) : '';
+      const awaiting = c.awaiting_customer_count > 0
+        ? '<span class="badge notified">' + c.awaiting_customer_count + ' מחכים לאיסוף</span>'
+        : '<span class="badge" style="background:var(--surface-2);color:var(--text-muted);">' + c.order_count + ' הזמנות</span>';
+      return '<div class="bag-row" data-phone="' + esc(c.phone) + '" style="cursor:pointer;">' +
+        '<div><div class="who">' + esc(c.first_name) + ' ' + esc(c.last_name) + ' · ' + esc(c.phone) + '</div>' +
+        '<div class="sub">' + esc(c.address || '') + ' · ' + c.order_count + ' הזמנות, ' + c.bag_count + ' שקיות' + last + supplierNo + '</div></div>' +
+        awaiting + '</div>';
+    }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:20px;">אין לקוחות תואמים</div>';
+    listEl.querySelectorAll('.bag-row').forEach(row => {
+      row.addEventListener('click', () => {
+        document.getElementById('filterSearch').value = row.dataset.phone;
+        document.querySelector('.tab[data-tab="list"]').click();
+      });
+    });
+  } catch (err) {
+    countEl.textContent = '';
+    listEl.innerHTML = '<div style="color:var(--danger);padding:10px;">שגיאה: ' + esc(err.message) + '</div>';
+  }
+}
+document.getElementById('reloadCustomers').onclick = loadCustomers;
+document.getElementById('customerSearch').addEventListener('input', () => {
+  clearTimeout(window._customerSearchDebounce);
+  window._customerSearchDebounce = setTimeout(loadCustomers, 400);
 });
 </script>
 </body>

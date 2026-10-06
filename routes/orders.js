@@ -156,16 +156,20 @@ router.post("/", asyncHandler(async (req, res) => {
   }
 }));
 
-// בדיקת לקוח קיים לפי טלפון — לפני יצירת הזמנה, כדי להציע את מספר הלקוח אצל הספק אם כבר ידוע
+// בדיקת לקוח קיים לפי טלפון — בזמן הקלדה בטופס הזמנה חדשה, כדי למלא אוטומטית שם/כתובת ולהציע את
+// מספר הלקוח אצל הספק. ההשוואה לפי ספרות בלבד (050-1234567 = 0501234567); מחזיר גם את הטלפון כפי
+// שהוא שמור, כדי שהטופס ישלח אותו בדיוק כך ו-POST / יזהה את אותו לקוח (שם ההשוואה מדויקת).
 router.get("/customer-lookup", asyncHandler(async (req, res) => {
-  const phone = (req.query.phone || "").trim();
-  if (!phone) {
+  const digits = (req.query.phone || "").replace(/\D/g, "");
+  if (!digits) {
     res.status(400).json({ error: "phone נדרש" });
     return;
   }
   const { rows } = await pool.query(
-    "select first_name, last_name, address, supplier_customer_number from customers where phone = $1",
-    [phone]
+    `select first_name, last_name, phone, address, supplier_customer_number from customers
+     where regexp_replace(phone, '\\D', '', 'g') = $1
+     order by created_at desc limit 1`,
+    [digits]
   );
   if (rows.length === 0) {
     res.json({ found: false });
@@ -404,6 +408,34 @@ router.get("/activity-log", asyncHandler(async (req, res) => {
     [limit]
   );
   res.json({ log: rows });
+}));
+
+// מאגר לקוחות — לטאב "ניהול". q = חיפוש חופשי (שם פרטי/משפחה/טלפון/כתובת), כולל סיכום הזמנות/שקיות לכל לקוח.
+router.get("/customers", asyncHandler(async (req, res) => {
+  const q = (req.query.q || "").trim();
+  const params = [];
+  let where = "";
+  if (q) {
+    params.push(`%${q}%`);
+    where = `where c.first_name ilike $1 or c.last_name ilike $1 or c.phone ilike $1 or c.address ilike $1
+                or (c.first_name || ' ' || c.last_name) ilike $1`;
+  }
+  const { rows } = await pool.query(
+    `select c.id, c.first_name, c.last_name, c.phone, c.address, c.supplier_customer_number, c.created_at,
+            count(distinct o.id)::int as order_count,
+            count(b.id)::int as bag_count,
+            count(b.id) filter (where b.status = 'returned' and b.customer_collected_at is null)::int as awaiting_customer_count,
+            max(o.created_at) as last_order_at
+     from customers c
+     left join orders o on o.customer_id = c.id
+     left join bags b on b.order_id = o.id
+     ${where}
+     group by c.id
+     order by max(o.created_at) desc nulls last, c.created_at desc
+     limit 500`,
+    params
+  );
+  res.json({ customers: rows });
 }));
 
 // רשימת כל ההזמנות + סיכום סטטוס שקיות לכל אחת — למסך "כל ההזמנות"

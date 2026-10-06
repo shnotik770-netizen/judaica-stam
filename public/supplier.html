@@ -290,11 +290,21 @@ async function getCameraDevices(){
   if (!cameraDevices.length) {
     try { cameraDevices = await Html5Qrcode.getCameras(); } catch (e) { cameraDevices = []; }
     if (cameraDevices.length) {
-      const backIdx = cameraDevices.findIndex(c => /back|rear|environment/i.test(c.label || ''));
+      const backIdx = cameraDevices.findIndex(c => /back|rear|environment|אחורי/i.test(c.label || ''));
       currentCameraIndex = backIdx >= 0 ? backIdx : cameraDevices.length - 1;
     }
   }
   return cameraDevices;
+}
+
+// חשוב: ב-html5-qrcode, כש-config.videoConstraints מוגדר הוא *מחליף לגמרי* את הארגומנט הראשון של start()
+// (בחירת המצלמה) — כך שאם שמים בו רק רזולוציה, הדפדפן בוחר מצלמת ברירת מחדל (בד"כ הקדמית) וכפתור
+// "החלף מצלמה" לא משפיע. לכן בחירת המצלמה (deviceId / facingMode) חייבת להיות גם בתוך videoConstraints.
+function cameraVideoConstraints(cameras){
+  const select = cameras.length
+    ? { deviceId: { exact: cameras[currentCameraIndex].id } }
+    : { facingMode: { ideal: 'environment' } };
+  return { ...select, width: { ideal: 1920 }, height: { ideal: 1080 } };
 }
 
 async function onCameraDecode(decodedText){
@@ -349,7 +359,7 @@ async function startCamera(){
       {
         fps: 15,
         qrbox: { width: 280, height: 140 },
-        videoConstraints: { width: { ideal: 1920 }, height: { ideal: 1080 } },
+        videoConstraints: cameraVideoConstraints(cameras),
         experimentalFeatures: { useBarCodeDetectorIfSupported: true },
       },
       onCameraDecode,
@@ -602,7 +612,7 @@ async function startQuickCamera(){
       {
         fps: 15,
         qrbox: { width: 280, height: 140 },
-        videoConstraints: { width: { ideal: 1920 }, height: { ideal: 1080 } },
+        videoConstraints: cameraVideoConstraints(cameras),
         experimentalFeatures: { useBarCodeDetectorIfSupported: true },
       },
       onQuickCameraDecode,
