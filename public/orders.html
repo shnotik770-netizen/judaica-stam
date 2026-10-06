@@ -203,6 +203,7 @@
           <div id="cameraWrap" class="hidden"><div id="cameraReader"></div></div>
           <button type="button" class="camera-toggle" id="cameraToggle">הפעל מצלמה</button>
           <button type="button" class="camera-toggle hidden" id="cameraTorch" style="background:var(--surface-2);color:var(--text);">🔦 הדלק פנס</button>
+          <button type="button" class="camera-toggle hidden" id="cameraSwitch" style="background:var(--surface-2);color:var(--text);">🔄 החלף מצלמה</button>
           <div class="camera-hint">סריקה רציפה — תעבירו שקית אחרי שקית מול המצלמה, בלי לצלם/לאשר כל אחת בנפרד</div>
         </div>
       </div>
@@ -811,8 +812,24 @@ document.querySelectorAll('.mode-tab').forEach(t => t.addEventListener('click', 
 
 let html5Qr = null;
 let cameraRunning = false;
+let cameraDevices = [];
+let currentCameraIndex = 0;
 const recentlySeen = new Map();
 const CAMERA_DEBOUNCE_MS = 3000;
+
+// מונה את המצלמות הזמינות (פעם אחת, מבקש הרשאה אם צריך) ובוחר כברירת מחדל את האחורית —
+// לפי label אם יש ("back"/"rear"/"environment"), אחרת מצלמה אחרונה ברשימה (נפוץ שזו האחורית).
+// facingMode:'environment' לבדו לא תמיד אמין (נצפה שפתח מצלמה קדמית במכשיר אמיתי).
+async function getCameraDevices(){
+  if (!cameraDevices.length) {
+    try { cameraDevices = await Html5Qrcode.getCameras(); } catch (e) { cameraDevices = []; }
+    if (cameraDevices.length) {
+      const backIdx = cameraDevices.findIndex(c => /back|rear|environment/i.test(c.label || ''));
+      currentCameraIndex = backIdx >= 0 ? backIdx : cameraDevices.length - 1;
+    }
+  }
+  return cameraDevices;
+}
 
 async function onCameraDecode(decodedText){
   const now = Date.now();
@@ -858,9 +875,11 @@ async function startCamera(){
     ],
     verbose: false,
   });
+  const cameras = await getCameraDevices();
+  const cameraIdOrConfig = cameras.length ? cameras[currentCameraIndex].id : { facingMode: 'environment' };
   try {
     await html5Qr.start(
-      { facingMode: 'environment' },
+      cameraIdOrConfig,
       {
         fps: 15,
         qrbox: { width: 280, height: 140 },
@@ -874,6 +893,7 @@ async function startCamera(){
     btn.textContent = 'עצור מצלמה';
     btn.classList.add('stop');
     setupTorchButton(html5Qr, 'cameraTorch');
+    document.getElementById('cameraSwitch').classList.toggle('hidden', cameras.length < 2);
   } catch (err) {
     addActionLog('err', 'מצלמה', 'לא הצלחתי לפתוח מצלמה: ' + (err?.message || err?.name || String(err)));
     wrap.classList.add('hidden');
@@ -889,6 +909,14 @@ async function stopCamera(){
   document.getElementById('cameraToggle').textContent = 'הפעל מצלמה';
   document.getElementById('cameraToggle').classList.remove('stop');
   document.getElementById('cameraTorch').classList.add('hidden');
+  document.getElementById('cameraSwitch').classList.add('hidden');
+}
+
+async function switchCamera(){
+  if (!cameraRunning || cameraDevices.length < 2) return;
+  currentCameraIndex = (currentCameraIndex + 1) % cameraDevices.length;
+  await stopCamera();
+  await startCamera();
 }
 
 document.getElementById('cameraToggle').addEventListener('click', () => {
@@ -897,6 +925,7 @@ document.getElementById('cameraToggle').addEventListener('click', () => {
 document.getElementById('cameraTorch').addEventListener('click', () => {
   if (cameraRunning) toggleTorch(html5Qr, 'cameraTorch');
 });
+document.getElementById('cameraSwitch').addEventListener('click', switchCamera);
 
 // --- ניהול: תיקון ידני + יומן פעולות ---
 document.getElementById('fixApply').addEventListener('click', async () => {

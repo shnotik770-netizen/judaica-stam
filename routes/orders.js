@@ -73,11 +73,13 @@ function printBagLabel(order_number, customer, bag) {
   });
 }
 
-// הזמנה "נעולה" לעריכה/מחיקה ברגע שאחת השקיות שלה כבר נכנסה למערכת הספק (כל סטטוס מלבד waiting_pickup) —
-// מאותו רגע השינוי חייב לעבור דרך הספק/המיכאל, לא דרכנו.
+// הזמנה "נעולה" לעריכה/מחיקה ברגע שאחת השקיות שלה באמת נכנסה למערכת הספק — כלומר נמשכה
+// לתוכנה שלו (imported_at, נקבע ב-GET /api/supplier/with-me) או כבר חזרה לגמרי (returned).
+// לא מספיק שהיא רק נסרקה כ"נאסף" (status='with_supplier') — בפער שבין הסריקה הפיזית לבין
+// המשיכה בפועל לתוכנה שלו עדיין אפשר לתקן טעויות בצד שלנו.
 async function isOrderLocked(orderId) {
   const { rows } = await pool.query(
-    "select 1 from bags where order_id = $1 and status != 'waiting_pickup' limit 1",
+    "select 1 from bags where order_id = $1 and (imported_at is not null or status = 'returned') limit 1",
     [orderId]
   );
   return rows.length > 0;
@@ -421,8 +423,8 @@ router.get("/", asyncHandler(async (req, res) => {
   res.json({ orders: rows });
 }));
 
-// צפייה בהזמנה — גם למסך העריכה. locked=true אם אחת השקיות כבר נכנסה למערכת הספק (לא ניתן יותר
-// לערוך/למחוק את ההזמנה או שקיות שלה — השינוי חייב לעבור דרכו).
+// צפייה בהזמנה — גם למסך העריכה. locked=true אם אחת השקיות כבר נמשכה בפועל לתוכנה של הספק
+// (imported_at) או כבר חזרה (returned) — לא ניתן יותר לערוך/למחוק את ההזמנה או שקיות שלה.
 router.get("/:order_number", asyncHandler(async (req, res) => {
   const o = await pool.query(
     `select o.id, o.order_number, o.status, c.first_name, c.last_name, c.phone, c.address
@@ -435,12 +437,12 @@ router.get("/:order_number", asyncHandler(async (req, res) => {
     return;
   }
   const bags = await pool.query(
-    `select bag_code, item_type, item_type_note, quantity, status, result, picked_up_at, returned_at
+    `select bag_code, item_type, item_type_note, quantity, status, result, picked_up_at, returned_at, imported_at
      from bags where order_id = $1 order by bag_code`,
     [o.rows[0].id]
   );
   const { id, ...order } = o.rows[0];
-  const locked = bags.rows.some((b) => b.status !== "waiting_pickup");
+  const locked = bags.rows.some((b) => b.imported_at != null || b.status === "returned");
   res.json({ ...order, locked, bags: bags.rows });
 }));
 
