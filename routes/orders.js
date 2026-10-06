@@ -178,6 +178,24 @@ router.get("/customer-lookup", asyncHandler(async (req, res) => {
   res.json({ found: true, ...rows[0] });
 }));
 
+// הצעות לקוחות לפי חלק מהטלפון — בטופס הזמנה חדשה, מ-6 ספרות. רק מציע (עד 5), הבחירה בידי המשתמש.
+// ההשוואה לפי ספרות בלבד, בכל מקום במספר (לא רק התחלה).
+router.get("/customer-search", asyncHandler(async (req, res) => {
+  const digits = (req.query.phone || "").replace(/\D/g, "");
+  if (digits.length < 6) {
+    res.json({ customers: [] });
+    return;
+  }
+  const { rows } = await pool.query(
+    `select first_name, last_name, phone, address, supplier_customer_number from customers
+     where regexp_replace(phone, '\\D', '', 'g') like $1
+     order by (regexp_replace(phone, '\\D', '', 'g') = $2) desc, created_at desc
+     limit 5`,
+    [`%${digits}%`, digits]
+  );
+  res.json({ customers: rows });
+}));
+
 // סטטוס "חזר" מתפצל ל-3 תתי-מצב לצורך סינון (לא עמודה אמיתית — b.status נשאר 'returned' תמיד,
 // ראו routes/orders.js POST /scan). not_collected משמש פנימית בצד הלקוח (סריקה ללקוח, מטרת "איסוף").
 const BAG_STATUS_CONDITIONS = {

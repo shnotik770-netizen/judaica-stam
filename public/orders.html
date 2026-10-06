@@ -70,6 +70,8 @@
   .filters{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;}
   @media (max-width:560px){.filters{grid-template-columns:1fr;}}
   .filters select,.filters input{font-size:13px;padding:8px 10px;}
+  .suggest-pick{display:block;width:100%;text-align:right;margin-top:4px;padding:8px 10px;border:1px solid var(--accent);border-radius:8px;background:var(--surface);color:var(--accent);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;}
+  .suggest-pick:hover{background:var(--accent-soft);}
   .suggest{font-size:12.5px;background:var(--accent-soft);color:var(--accent);border-radius:8px;padding:7px 10px;margin-top:-6px;}
   .bag-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 14px;border:1px solid var(--border);border-radius:11px;background:var(--surface);}
   .bag-row .who{font-size:13.5px;font-weight:600;}
@@ -81,6 +83,9 @@
   .mode-tab.active{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);}
   .scan-input{width:100%;padding:16px;font-size:20px;border:2px solid var(--accent);border-radius:12px;text-align:center;font-family:ui-monospace,monospace;background:var(--surface);color:var(--text);}
   #cameraWrap{position:relative;border-radius:12px;overflow:hidden;background:#000;}
+  .zoom-row{direction:ltr;display:flex;align-items:center;justify-content:center;gap:14px;}
+  .zoom-row button{width:52px;height:44px;border-radius:10px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:24px;font-weight:700;cursor:pointer;}
+  .zoom-row .zoom-level{min-width:70px;text-align:center;font-weight:600;font-size:14px;}
   #cameraReader{width:100%;}
   .camera-hint{font-size:12px;color:var(--text-muted);text-align:center;}
   button.camera-toggle{width:100%;background:var(--accent);color:#fff;border:none;border-radius:10px;padding:12px;font-weight:600;font-size:14px;cursor:pointer;}
@@ -203,6 +208,7 @@
           <div id="cameraWrap" class="hidden"><div id="cameraReader"></div></div>
           <button type="button" class="camera-toggle" id="cameraToggle">הפעל מצלמה</button>
           <button type="button" class="camera-toggle hidden" id="cameraTorch" style="background:var(--surface-2);color:var(--text);">🔦 הדלק פנס</button>
+          <div class="zoom-row hidden" id="cameraZoom"><button type="button" class="zoom-out" aria-label="הרחק">−</button><span class="zoom-level"></span><button type="button" class="zoom-in" aria-label="קרב">+</button></div>
           <button type="button" class="camera-toggle hidden" id="cameraSwitch" style="background:var(--surface-2);color:var(--text);">🔄 החלף מצלמה</button>
           <div class="camera-hint">סריקה רציפה — תעבירו שקית אחרי שקית מול המצלמה, בלי לצלם/לאשר כל אחת בנפרד</div>
         </div>
@@ -343,34 +349,45 @@ function addBag(){
 document.getElementById('addBag').onclick = addBag;
 addBag();
 
-// לקוח קיים: כבר בזמן הקלדת הטלפון (מ-9 ספרות) — ממלא אוטומטית שם+כתובת ומציג מספר לקוח אצל הספק אם ידוע
+// לקוח קיים: מ-6 ספרות בשדה הטלפון מציג הצעות ללקוחות תואמים — לא ממלא לבד, רק בלחיצה על הצעה
+// (ממלא שם+כתובת, ומחליף את הטלפון לפורמט השמור כדי שיצירת ההזמנה תשויך לאותו לקוח).
 const phoneInput = document.getElementById('phone');
 const suggestEl = document.getElementById('customerSuggest');
-let lastLookupDigits = '';
-async function lookupCustomer(){
+let lastSearchDigits = '';
+function pickCustomer(c){
+  document.getElementById('firstName').value = c.first_name || '';
+  document.getElementById('lastName').value = c.last_name || '';
+  document.getElementById('address').value = c.address || '';
+  phoneInput.value = c.phone;
+  lastSearchDigits = c.phone.replace(/\D/g, '');
+  suggestEl.textContent = '✓ נבחר לקוח קיים: ' + c.first_name + ' ' + c.last_name +
+    (c.supplier_customer_number ? ' · מספר לקוח אצל הספק: ' + c.supplier_customer_number : '');
+  suggestEl.classList.remove('hidden');
+}
+async function searchCustomers(){
   const digits = phoneInput.value.replace(/\D/g, '');
-  if (digits.length < 9) { lastLookupDigits = ''; suggestEl.classList.add('hidden'); return; }
-  if (digits === lastLookupDigits) return;
-  lastLookupDigits = digits;
+  if (digits.length < 6) { lastSearchDigits = ''; suggestEl.classList.add('hidden'); return; }
+  if (digits === lastSearchDigits) return;
+  lastSearchDigits = digits;
   try {
-    const res = await fetch(API_BASE + '/api/orders/customer-lookup?phone=' + encodeURIComponent(digits));
+    const res = await fetch(API_BASE + '/api/orders/customer-search?phone=' + encodeURIComponent(digits));
     const data = await res.json();
     if (phoneInput.value.replace(/\D/g, '') !== digits) return; // המשתמש המשיך להקליד בינתיים
-    if (!data.found) { suggestEl.classList.add('hidden'); return; }
-    document.getElementById('firstName').value = data.first_name || '';
-    document.getElementById('lastName').value = data.last_name || '';
-    document.getElementById('address').value = data.address || '';
-    phoneInput.value = data.phone; // בדיוק כפי שנשמר, כדי שיצירת ההזמנה תשויך לאותו לקוח
-    suggestEl.textContent = '✓ לקוח קיים: ' + data.first_name + ' ' + data.last_name + ' — הפרטים מולאו אוטומטית' +
-      (data.supplier_customer_number ? ' · מספר לקוח אצל הספק: ' + data.supplier_customer_number : '');
+    if (!data.customers || !data.customers.length) { suggestEl.classList.add('hidden'); return; }
+    suggestEl.innerHTML = '<div style="margin-bottom:6px;">לקוחות קיימים תואמים — לחץ לבחירה:</div>' +
+      data.customers.map((c, i) =>
+        '<button type="button" class="suggest-pick" data-i="' + i + '">' +
+        esc(c.first_name) + ' ' + esc(c.last_name) + ' · ' + esc(c.phone) + (c.address ? ' · ' + esc(c.address) : '') +
+        '</button>').join('');
+    suggestEl.querySelectorAll('.suggest-pick').forEach(btn =>
+      btn.addEventListener('click', () => pickCustomer(data.customers[+btn.dataset.i])));
     suggestEl.classList.remove('hidden');
   } catch (err) { /* לא קריטי, מתעלמים */ }
 }
 phoneInput.addEventListener('input', () => {
   clearTimeout(window._phoneLookupDebounce);
-  window._phoneLookupDebounce = setTimeout(lookupCustomer, 350);
+  window._phoneLookupDebounce = setTimeout(searchCustomers, 300);
 });
-phoneInput.addEventListener('blur', lookupCustomer);
 
 document.getElementById('orderForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -406,6 +423,7 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
     msg.innerHTML = 'הזמנה מספר ' + data.order_number + ' נוצרה, ' + data.bags.length + ' מדבקות נשלחו להדפסה.<div class="codes">' +
       data.bags.map(b => b.bag_code).join(' · ') + '</div>';
     e.target.reset();
+    suggestEl.classList.add('hidden'); lastSearchDigits = '';
     bagsEl.innerHTML = ''; bagCount = 0; addBag();
     if (!document.getElementById('listPanel').classList.contains('hidden')) loadList();
   } catch (err) {
@@ -881,6 +899,30 @@ function setupTorchButton(instance, btnId){
     btn.classList.add('hidden');
   }
 }
+// זום אמיתי של המצלמה (לא הגדלת תצוגה ב-CSS — המפענח קורא את הפריים הגולמי מהמצלמה, אז רק זום של
+// המצלמה עצמה עוזר לסרוק ברקוד קטן בלי להצמיד את הטלפון). מוצג רק אם המכשיר תומך (בד"כ Chrome באנדרואיד).
+function setupZoomControls(instance, rowId){
+  const row = document.getElementById(rowId);
+  let caps = null;
+  try { caps = instance.getRunningTrackCapabilities && instance.getRunningTrackCapabilities(); } catch (e) {}
+  const z = caps && caps.zoom;
+  if (!z || !(z.max > z.min)) { row.classList.add('hidden'); return; }
+  let level = z.min;
+  try { level = instance.getRunningTrackSettings().zoom || z.min; } catch (e) {}
+  const step = Math.max(z.step || 0.1, (z.max - z.min) / 8);
+  const label = row.querySelector('.zoom-level');
+  const show = () => { label.textContent = 'זום ×' + (Math.round(level * 10) / 10); };
+  const apply = async (delta) => {
+    const next = Math.min(z.max, Math.max(z.min, level + delta));
+    if (next === level) return;
+    try { await instance.applyVideoConstraints({ advanced: [{ zoom: next }] }); level = next; show(); } catch (e) {}
+  };
+  row.querySelector('.zoom-in').onclick = () => apply(step);
+  row.querySelector('.zoom-out').onclick = () => apply(-step);
+  show();
+  row.classList.remove('hidden');
+}
+
 async function toggleTorch(instance, btnId){
   const btn = document.getElementById(btnId);
   try {
@@ -922,6 +964,7 @@ async function startCamera(){
     btn.textContent = 'עצור מצלמה';
     btn.classList.add('stop');
     setupTorchButton(html5Qr, 'cameraTorch');
+    setupZoomControls(html5Qr, 'cameraZoom');
     document.getElementById('cameraSwitch').classList.toggle('hidden', cameras.length < 2);
   } catch (err) {
     addActionLog('err', 'מצלמה', 'לא הצלחתי לפתוח מצלמה: ' + (err?.message || err?.name || String(err)));
@@ -938,6 +981,7 @@ async function stopCamera(){
   document.getElementById('cameraToggle').textContent = 'הפעל מצלמה';
   document.getElementById('cameraToggle').classList.remove('stop');
   document.getElementById('cameraTorch').classList.add('hidden');
+  document.getElementById('cameraZoom').classList.add('hidden');
   document.getElementById('cameraSwitch').classList.add('hidden');
 }
 
