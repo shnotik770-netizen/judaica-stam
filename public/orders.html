@@ -541,6 +541,7 @@ async function loadList(){
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'שגיאה');
     countEl.textContent = data.bags.length + ' שקיות';
+    syncSmsAlerts();
     listEl.innerHTML = data.bags.map(b => {
       const when = (b.created_at_hebrew ? b.created_at_hebrew + ' · ' : '') + new Date(b.created_at).toLocaleDateString('he-IL');
       const item = (ITEM_LABELS[b.item_type] || b.item_type) + (b.quantity > 1 ? ' ×' + b.quantity : '');
@@ -906,6 +907,7 @@ async function applyQuickAction(codes, force){
           const extra = r.grouped_bag_codes && r.grouped_bag_codes.length > 1
             ? ' · קובצו ' + r.grouped_bag_codes.length + ' שקיות של אותו טלפון' : '';
           addActionLog('ok', who + (r.repeat ? ' — דווח שוב' : ' — עודכן ללקוח'), 'הזמנה #' + r.order_number + extra);
+          clearSmsAlertCodes(r.grouped_bag_codes && r.grouped_bag_codes.length ? r.grouped_bag_codes : [r.bag_code]);
           flashScan('ok', r.bag_code, item, (r.repeat ? '✓ דווח שוב ללקוח' : '✓ עודכן ללקוח') + (quickAction === 'notify_sms' ? ' (SMS)' : '') + extra, who);
         } else if (r.action === 'collected') {
           addActionLog('ok', who + ' — נאסף ע"י לקוח', 'הזמנה #' + r.order_number);
@@ -1289,7 +1291,33 @@ function addSmsAlert(r){
   saveSmsAlerts();
   renderSmsAlerts();
 }
+// הלקוח עודכן בסוף (סימון ידני או SMS חוזר שהצליח) — מורידים את השקיות האלה מההתראות; התראה שנשארה בלי שקיות נעלמת
+function clearSmsAlertCodes(codes){
+  if (!smsAlerts.length) return;
+  const done = new Set(codes);
+  smsAlerts = smsAlerts.map(a => ({ ...a, codes: a.codes.filter(c => !done.has(c)) })).filter(a => a.codes.length);
+  saveSmsAlerts();
+  renderSmsAlerts();
+}
+// גם אם העדכון נעשה ממכשיר אחר / מסך אחר: בטעינה ובכל רענון רשימה בודקים מול השרת אם השקית סומנה
+// "עודכן ללקוח" אחרי זמן ההתראה
+async function syncSmsAlerts(){
+  if (!smsAlerts.length) return;
+  const codes = [...new Set(smsAlerts.flatMap(a => a.codes))];
+  const notifiedAt = {};
+  await Promise.all(codes.map(async code => {
+    try {
+      const res = await fetch(API_BASE + '/api/orders/bags?q=' + encodeURIComponent(code));
+      const data = await res.json();
+      const bag = (data.bags || []).find(b => b.bag_code === code);
+      if (bag && bag.customer_notified_at) notifiedAt[code] = new Date(bag.customer_notified_at).getTime();
+    } catch (e) { /* לא קריטי — ננסה שוב ברענון הבא */ }
+  }));
+  const done = codes.filter(code => smsAlerts.some(a => a.codes.includes(code) && notifiedAt[code] > a.at));
+  if (done.length) clearSmsAlertCodes(done);
+}
 renderSmsAlerts();
+syncSmsAlerts();
 </script>
 </body>
 </html>
