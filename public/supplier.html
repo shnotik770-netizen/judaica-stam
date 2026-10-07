@@ -777,7 +777,6 @@ document.querySelectorAll('#quickScanChooser .purpose-btn').forEach(b => b.addEv
   }
   const sub = document.getElementById('quickScanSub');
   if (sub.classList.contains('hidden')) document.getElementById('quickScanToggle').click();
-  document.getElementById('quickActionPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }));
 // טאב ברירת המחדל: ממתינים לאיסוף
 loadPending();
@@ -795,6 +794,12 @@ function openQuickScanArea(){
   document.getElementById('quickScanSub').classList.remove('hidden');
   showScanMode(true);
   syncQaCameraBtn();
+  // ישר לשדה הסריקה: גלילה אליו + פוקוס, כדי שסורק מחובר (או הקלדה) ייכנס אליו מיד
+  setTimeout(() => {
+    const input = document.getElementById('quickScanInput');
+    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    input.focus({ preventScroll: true });
+  }, 50);
 }
 document.getElementById('qaCameraBtn').addEventListener('click', async () => {
   if (quickCameraRunning) { await stopQuickCamera(); showScanMode(true); return; }

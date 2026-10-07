@@ -1561,6 +1561,12 @@ function openQuickScanArea(){
   document.getElementById('quickScanPanel').classList.remove('hidden');
   showScanMode(true);
   syncQaCameraBtn();
+  // ישר לשדה הסריקה: גלילה אליו + פוקוס, כדי שסורק מחובר (או הקלדה) ייכנס אליו מיד
+  setTimeout(() => {
+    const input = document.getElementById('scanInput');
+    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    input.focus({ preventScroll: true });
+  }, 50);
 }
 document.getElementById('qaCameraBtn').addEventListener('click', async () => {
   if (cameraRunning) { await stopCamera(); showScanMode(true); return; }
