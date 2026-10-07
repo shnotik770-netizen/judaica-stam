@@ -117,3 +117,15 @@ alter table api_keys add constraint api_keys_scope_check check (scope in ('inter
 
 -- מפתח קיים שכבר הונפק ל"יודאיקה פלוס" לפני שהיה scope — מסמן אותו בדיעבד כ-supplier
 update api_keys set scope = 'supplier' where label = 'יודאיקה פלוס' and scope = 'internal';
+
+-- דוחות שהתוכנה של הספק (יודאיקה פלוס) שולחת על שקית — POST /api/supplier/report. פורמט חופשי: summary
+-- (טקסט קצר לתצוגה) ו/או report (כל JSON שהתוכנה שלו מייצרת — נשמר כמו שהוא, מוצג גנרית בחנות).
+-- כמה דוחות לשקית אפשריים (תיקון/השלמה) — מוצג האחרון, ההיסטוריה נשמרת.
+create table if not exists bag_reports (
+  id uuid primary key default gen_random_uuid(),
+  bag_id uuid not null references bags(id) on delete cascade,
+  summary text,
+  report json, -- json ולא jsonb: שומר את סדר השדות כמו שהתוכנה שלו שלחה (לתצוגה)
+  received_at timestamptz not null default now()
+);
+create index if not exists idx_bag_reports_bag on bag_reports(bag_id, received_at desc);

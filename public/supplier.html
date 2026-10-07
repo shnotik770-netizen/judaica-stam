@@ -434,7 +434,8 @@ function renderMine(){
   document.getElementById('mineCount').textContent = filtered.length + ' שקיות אצלי כרגע';
   document.getElementById('mineBody').innerHTML = renderRows(filtered, (b) =>
     ' · ' + (STAGE_LABELS[b.stage] || b.stage) +
-    (b.picked_up_at ? ' · אצלי מאז ' + new Date(b.picked_up_at).toLocaleDateString('he-IL') : ''), active);
+    (b.picked_up_at ? ' · אצלי מאז ' + new Date(b.picked_up_at).toLocaleDateString('he-IL') : '') +
+    (b.report_received_at ? ' · 📋 נשלח דוח' : ''), active);
   if (active) wireRowClicks('mineBody');
 }
 document.getElementById('mineReload').onclick = loadMine;
@@ -618,7 +619,7 @@ document.getElementById('quickCameraSwitch').addEventListener('click', switchQui
 // מחיקה מחזירה את השקית למצב שלפני אותה פעולה (DELETE /api/orders/activity-log/:id, ראו README).
 const SUPPLIER_LOG_LABELS = {
   order_created: 'הזמנה נוצרה', bag_added: 'שקית נוספה', label_reprinted: 'מדבקה הודפסה שוב',
-  picked_up: 'נאסף ע"י הספק', returned: 'הוחזר מהספק', customer_notified: 'עודכן ללקוח',
+  report_received: '📋 נשלח דוח', picked_up: 'נאסף ע"י מיכאל', returned: 'הוחזר ממיכאל', customer_notified: 'עודכן ללקוח',
   customer_collected: 'נאסף ע"י לקוח', manual_fix: 'תיקון ידני (חנות)', print_failed: 'הדפסת מדבקה נכשלה',
 };
 const SUPPLIER_EDITABLE_ACTIONS = new Set(['picked_up', 'returned']);

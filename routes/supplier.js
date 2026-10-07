@@ -13,7 +13,8 @@ const COLLECTION_WINDOW_MS = 30 * 60 * 1000; // חלון קיבוץ לאיסוף
 const BAG_SELECT = `
   select b.*, o.order_number, o.notes as order_notes,
          c.first_name, c.last_name, c.phone, c.address,
-         col.collection_number, col.started_at as collection_started_at
+         col.collection_number, col.started_at as collection_started_at,
+         (select max(r.received_at) from bag_reports r where r.bag_id = b.id) as report_received_at
   from bags b
   join orders o on o.id = b.order_id
   join customers c on c.id = o.customer_id
@@ -43,6 +44,7 @@ function serializeBag(bag) {
     picked_up_at: bag.picked_up_at,
     imported_at: bag.imported_at,
     returned_at: bag.returned_at,
+    report_received_at: bag.report_received_at || null, // null = עוד לא נשלח דוח על השקית
     collection_number: bag.collection_number || null,
     collection_started_at: bag.collection_started_at || null,
     customer: {
@@ -218,6 +220,60 @@ router.post("/bulk-scan", asyncHandler(async (req, res) => {
 
 // הספק מדווח לנו מה מספר הלקוח שהוא שייך ללקוח הזה אצלו — נשמר לפי טלפון, ויוצע אוטומטית
 // בפעם הבאה שאותו טלפון מוזן אצלנו בהזמנה חדשה.
+// דוח מהתוכנה של הספק על שקית — פורמט חופשי (ראו SUPPLIER_API.md). גוף: דוח בודד
+// {bag_code, summary?, report?, mark_returned?} או כמה בבת אחת {reports: [...]}. report = כל JSON, נשמר כמו שהוא.
+// mark_returned:true גם מסמן את השקית כהוחזרה (אם היא אצל הספק) — כמו "מסירה לחנות", עם הדוח כ-result.
+router.post("/report", asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const items = Array.isArray(body.reports) ? body.reports : [body];
+  if (items.length === 0 || items.length > 200) {
+    res.status(400).json({ error: "צריך דוח אחד לפחות (ועד 200 בבקשה אחת)" });
+    return;
+  }
+  const results = [];
+  for (const item of items) {
+    const { bag_code, summary, report, mark_returned } = item || {};
+    if (!bag_code) { results.push({ bag_code: null, ok: false, error: "bag_code נדרש" }); continue; }
+    if ((summary == null || String(summary).trim() === "") && report === undefined) {
+      results.push({ bag_code, ok: false, error: "צריך summary או report (או שניהם)" });
+      continue;
+    }
+    const bag = await loadBag(String(bag_code));
+    if (!bag) { results.push({ bag_code, ok: false, error: "קוד לא מוכר" }); continue; }
+    if (bag.status === "waiting_pickup") {
+      results.push({ bag_code, ok: false, error: "השקית עוד לא נאספה — אי אפשר לשלוח עליה דוח" });
+      continue;
+    }
+    const cleanSummary = summary == null ? null : String(summary).trim().slice(0, 2000) || null;
+    const { rows } = await pool.query(
+      "insert into bag_reports (bag_id, summary, report) values ($1, $2, $3) returning id, received_at",
+      [bag.id, cleanSummary, report === undefined ? null : JSON.stringify(report)]
+    );
+    logActivity(bag.bag_code, bag.order_number, "report_received", cleanSummary ? cleanSummary.slice(0, 200) : null);
+    let returned = false;
+    if (mark_returned && bag.status === "with_supplier") {
+      await returnBag(bag, report === undefined ? { summary: cleanSummary } : report);
+      returned = true;
+    }
+    results.push({ bag_code: bag.bag_code, ok: true, report_id: rows[0].id, received_at: rows[0].received_at, returned });
+  }
+  res.json({ results });
+}));
+
+// הדוחות שהתקבלו על שקית (מהחדש לישן) — כדי שהתוכנה של הספק תוכל לוודא מה נקלט אצלנו
+router.get("/report/:code", asyncHandler(async (req, res) => {
+  const bag = await loadBag(req.params.code);
+  if (!bag) {
+    res.status(404).json({ error: "קוד לא מוכר" });
+    return;
+  }
+  const { rows } = await pool.query(
+    "select id, summary, report, received_at from bag_reports where bag_id = $1 order by received_at desc",
+    [bag.id]
+  );
+  res.json({ bag_code: bag.bag_code, reports: rows });
+}));
+
 router.post("/customer-link", asyncHandler(async (req, res) => {
   const { phone, customer_number } = req.body || {};
   if (!phone || !customer_number) {

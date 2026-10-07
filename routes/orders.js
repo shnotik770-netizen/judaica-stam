@@ -245,6 +245,7 @@ router.get("/bags", asyncHandler(async (req, res) => {
     `select o.order_number, c.first_name, c.last_name, c.phone,
             b.bag_code, b.item_type, b.item_type_note, b.quantity, b.status,
             b.picked_up_at, b.imported_at, b.returned_at, b.customer_notified_at, b.customer_collected_at, b.created_at,
+            (select max(r.received_at) from bag_reports r where r.bag_id = b.id) as report_received_at,
             col.collection_number, col.started_at as collection_started_at
      from bags b
      join orders o on o.id = b.order_id
@@ -405,7 +406,7 @@ const withHebrewDates = (rows) => rows.map((r) => ({ ...r, created_at_hebrew: to
 // (השוואות זמן נעשות ב-SQL מול השורה עצמה: Date של JS מאבד את המיקרו-שניות של timestamptz.)
 const STATE_ACTIONS = ["picked_up", "returned", "customer_notified", "customer_collected", "manual_fix"];
 const STATE_ACTION_LABELS = {
-  picked_up: "נאסף ע\"י הספק", returned: "הוחזר מהספק", customer_notified: "עודכן ללקוח",
+  picked_up: "נאסף ע\"י מיכאל", returned: "הוחזר ממיכאל", customer_notified: "עודכן ללקוח",
   customer_collected: "נאסף ע\"י לקוח", manual_fix: "תיקון ידני",
   label_reprinted: "מדבקה הודפסה שוב", print_failed: "הדפסה נכשלה", bag_added: "שקית נוספה",
 };
@@ -605,7 +606,8 @@ router.get("/:order_number", asyncHandler(async (req, res) => {
   }
   const bags = await pool.query(
     `select bag_code, item_type, item_type_note, quantity, status, result, picked_up_at, returned_at, imported_at,
-            customer_notified_at, customer_collected_at
+            customer_notified_at, customer_collected_at,
+            (select max(r.received_at) from bag_reports r where r.bag_id = bags.id) as report_received_at
      from bags where order_id = $1 order by bag_code`,
     [o.rows[0].id]
   );
@@ -738,6 +740,17 @@ router.delete("/:order_number", asyncHandler(async (req, res) => {
 
 // תיקון ידני של סטטוס שקית — עוקף את ה"נעילה" במתכוון, לתיקון טעויות (למשל סריקה שגויה).
 // זהירות: לא מנהל קשרים (collection/טיימר כפילות) כמו הנתיבים הרגילים — שינוי ישיר של status בלבד,
+
+// דוחות הספק על שקית (POST /api/supplier/report) — למסך העריכה בחנות, מהחדש לישן
+router.get("/bags/:bag_code/reports", asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    `select r.id, r.summary, r.report, r.received_at
+     from bag_reports r join bags b on b.id = r.bag_id
+     where b.bag_code = $1 order by r.received_at desc`,
+    [req.params.bag_code]
+  );
+  res.json({ reports: rows.map((r) => ({ ...r, received_at_hebrew: toHebrewDate(r.received_at) })) });
+}));
 // עם אפשרות לאפס את חותמות הלקוח. כל שימוש נרשם ביומן הפעולות לצורך מעקב.
 const BAG_STATUSES = ["waiting_pickup", "with_supplier", "returned"];
 router.put("/bags/:bag_code/force-status", asyncHandler(async (req, res) => {

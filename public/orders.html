@@ -158,6 +158,14 @@
   body.qa-on .qa-hide{display:none !important;}
   #qaBanner .qa-actions{display:flex;gap:6px;flex-shrink:0;}
   #qaBanner button.qa-cam{background:rgba(255,255,255,.18);color:#fff;border:1px solid rgba(255,255,255,.7);padding:6px 10px;font-size:12px;}
+  .report-box{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--border);padding-top:8px;}
+  .report-item{background:var(--accent-soft);border-radius:9px;padding:9px 11px;font-size:12.5px;display:flex;flex-direction:column;gap:6px;}
+  .report-head{font-weight:700;color:var(--accent);}
+  .report-summary{font-size:13.5px;font-weight:600;}
+  .report-table{border-collapse:collapse;width:100%;}
+  .report-table th,.report-table td{text-align:right;vertical-align:top;padding:3px 6px;border-bottom:1px solid var(--border);}
+  .report-table th{color:var(--text-muted);font-weight:600;white-space:nowrap;width:1%;}
+  .report-item pre{white-space:pre-wrap;word-break:break-word;font-size:11.5px;margin:4px 0 0;}
 </style>
 </head>
 <body>
@@ -586,9 +594,10 @@ async function loadList(){
         ? ' · איסוף #' + b.collection_number + ' (' + new Date(b.collection_started_at).toLocaleDateString('he-IL') + ')'
         : '';
       const noteInfo = b.item_type_note ? ' · 📝 ' + esc(b.item_type_note) : '';
+      const reportInfo = b.report_received_at ? ' · 📋 יש דוח ממיכאל' : '';
       return '<div class="bag-row" data-order="' + b.order_number + '" data-code="' + b.bag_code + '" style="cursor:pointer;">' +
         '<div><div class="who">' + b.bag_code + ' · ' + esc(b.first_name) + ' ' + esc(b.last_name) + '</div>' +
-        '<div class="sub">הזמנה #' + b.order_number + ' · ' + item + ' · נוצר ' + when + collectionInfo + noteInfo + '</div></div>' +
+        '<div class="sub">הזמנה #' + b.order_number + ' · ' + item + ' · נוצר ' + when + collectionInfo + noteInfo + reportInfo + '</div></div>' +
         statusBadge(b) +
         '</div>';
     }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:20px;">אין שקיות תואמות</div>';
@@ -651,14 +660,17 @@ function renderEdit(data){
     const delBtn = editLocked ? '' : '<button type="button" class="btn-danger editDelBag" data-code="' + b.bag_code + '">מחק שקית</button>';
     const reprintBtn = '<button type="button" class="btn-ghost editReprint" data-code="' + b.bag_code + '" style="padding:6px 10px;font-size:12.5px;">🖨️ הדפס שוב</button>';
     const historyBtn = '<button type="button" class="btn-ghost editHistory" data-code="' + b.bag_code + '" style="padding:6px 10px;font-size:12.5px;">🕘 היסטוריה</button>';
+    const reportBtn = b.report_received_at
+      ? '<button type="button" class="btn-ghost editReport" data-code="' + b.bag_code + '" style="padding:6px 10px;font-size:12.5px;border-color:var(--accent);color:var(--accent);">📋 דוח ממיכאל</button>' : '';
     return '<div class="bag">' +
-      '<div class="bag-head"><b>' + b.bag_code + ' · ' + statusBadge(b) + '</b><div style="display:flex;gap:8px;flex-wrap:wrap;">' + historyBtn + reprintBtn + delBtn + '</div></div>' +
+      '<div class="bag-head"><b>' + b.bag_code + ' · ' + statusBadge(b) + '</b><div style="display:flex;gap:8px;flex-wrap:wrap;">' + reportBtn + historyBtn + reprintBtn + delBtn + '</div></div>' +
       '<div class="bag-grid">' +
       '<div class="field"><label>סוג פריט</label><select class="editItemType" data-code="' + b.bag_code + '"' + (editLocked ? ' disabled' : '') + '>' +
         itemTypeOptionsHtml(b.item_type) + '</select></div>' +
       '<div class="field"><label>כמות</label><input type="number" class="editQty" data-code="' + b.bag_code + '" value="' + b.quantity + '" min="1"' + (editLocked ? ' disabled' : '') + '></div>' +
       '<div class="field"><label>הערות</label><input class="editNote" data-code="' + b.bag_code + '" placeholder="הערה לשקית (לא חובה)" value="' + esc(b.item_type_note || '') + '"' + (editLocked ? ' disabled' : '') + '></div>' +
       '</div>' +
+      '<div class="hidden report-box" id="report-' + b.bag_code + '"></div>' +
       '<div class="hidden" id="history-' + b.bag_code + '" style="display:flex;flex-direction:column;gap:5px;border-top:1px solid var(--border);padding-top:8px;"></div>' +
       '</div>';
   }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:12px;">אין שקיות בהזמנה זו</div>';
@@ -689,6 +701,12 @@ function renderEdit(data){
     }
   }));
 
+  document.querySelectorAll('.editReport').forEach(btn => btn.addEventListener('click', () => {
+    const box = document.getElementById('report-' + btn.dataset.code);
+    if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    loadBagReports(btn.dataset.code, box);
+  }));
   document.querySelectorAll('.editHistory').forEach(btn => btn.addEventListener('click', () => {
     const container = document.getElementById('history-' + btn.dataset.code);
     if (!container.classList.contains('hidden')) { container.classList.add('hidden'); return; }
@@ -1226,10 +1244,10 @@ document.getElementById('smsTemplateSave').addEventListener('click', async () =>
 const LOG_ACTION_LABELS = {
   order_created: 'הזמנה נוצרה', order_edited: 'הזמנה נערכה', order_deleted: 'הזמנה נמחקה',
   bag_added: 'שקית נוספה', bag_deleted: 'שקית נמחקה', label_reprinted: 'מדבקה הודפסה שוב',
-  picked_up: 'נאסף ע"י הספק', returned: 'הוחזר מהספק',
+  picked_up: 'נאסף ע"י מיכאל', returned: 'הוחזר ממיכאל',
   customer_notified: 'עודכן ללקוח', customer_collected: 'נאסף ע"י לקוח',
   customer_linked: 'דווח מספר לקוח', manual_fix: 'תיקון ידני', settings_changed: 'הגדרה עודכנה',
-  print_failed: '⚠️ הדפסת מדבקה נכשלה', sms_failed: '⚠️ SMS ללקוח לא נשלח',
+  report_received: '📋 התקבל דוח ממיכאל', print_failed: '⚠️ הדפסת מדבקה נכשלה', sms_failed: '⚠️ SMS ללקוח לא נשלח',
 };
 const LOG_ERROR_ACTIONS = new Set(['print_failed', 'sms_failed']);
 LOG_ACTION_LABELS.log_entry_deleted = '🗑 שורה נמחקה מההיסטוריה';
@@ -1396,6 +1414,38 @@ document.getElementById('qaCameraBtn').addEventListener('click', async () => {
   showScanMode(false);
   await startCamera();
 });
+// --- דוחות מהתוכנה של מיכאל (POST /api/supplier/report): פורמט חופשי — summary כטקסט, report (כל JSON)
+// מוצג גנרית: אובייקט כטבלת שדה/ערך (ערכים מקוננים כ-JSON), כל דבר אחר כטקסט. + הנתונים הגולמיים בלחיצה.
+function reportValueHtml(v){
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'object') return '<code style="white-space:pre-wrap;">' + esc(JSON.stringify(v, null, 1)) + '</code>';
+  return esc(String(v));
+}
+function reportBodyHtml(report){
+  if (report === null || report === undefined) return '';
+  if (typeof report === 'object' && !Array.isArray(report)) {
+    return '<table class="report-table">' + Object.entries(report).map(([k, v]) =>
+      '<tr><th>' + esc(k) + '</th><td>' + reportValueHtml(v) + '</td></tr>').join('') + '</table>';
+  }
+  return '<div>' + reportValueHtml(report) + '</div>';
+}
+async function loadBagReports(code, box){
+  box.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">טוען…</div>';
+  try {
+    const res = await fetch(API_BASE + '/api/orders/bags/' + encodeURIComponent(code) + '/reports');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה');
+    box.innerHTML = data.reports.map((r, i) =>
+      '<div class="report-item">' +
+        '<div class="report-head">' + (i === 0 ? '📋 דוח אחרון' : 'דוח קודם') + ' · ' + logWhenHtml({ created_at: r.received_at, created_at_hebrew: r.received_at_hebrew }) + '</div>' +
+        (r.summary ? '<div class="report-summary">' + esc(r.summary) + '</div>' : '') +
+        reportBodyHtml(r.report) +
+        (r.report != null ? '<details><summary>נתונים גולמיים</summary><pre>' + esc(JSON.stringify(r.report, null, 2)) + '</pre></details>' : '') +
+      '</div>').join('') || '<div style="color:var(--text-muted);font-size:12px;">אין דוחות</div>';
+  } catch (err) {
+    box.innerHTML = '<div style="color:var(--danger);font-size:12px;">שגיאה: ' + esc(err.message) + '</div>';
+  }
+}
 </script>
 </body>
 </html>
