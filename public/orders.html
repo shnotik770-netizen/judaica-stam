@@ -166,6 +166,8 @@
   .report-table th,.report-table td{text-align:right;vertical-align:top;padding:3px 6px;border-bottom:1px solid var(--border);}
   .report-table th{color:var(--text-muted);font-weight:600;white-space:nowrap;width:1%;}
   .report-item pre{white-space:pre-wrap;word-break:break-word;font-size:11.5px;margin:4px 0 0;}
+  .variant-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .variant-row:empty{display:none;}
 </style>
 </head>
 <body>
@@ -397,12 +399,43 @@
       <div class="field"><label>כמות</label><input type="number" class="qty" value="1" min="1"></div>
       <div class="field"><label>הערות</label><input class="note" placeholder="הערה לשקית (לא חובה)"></div>
     </div>
+    <div class="variant-row"></div>
   </div>
 </template>
 
 <script>
 const API_BASE = "";
 
+// --- פרטי הפריט ב"שפה המשותפת" עם יודאיקה פלוס (lib/variant.js בשרת — אותם קודים בדיוק) ---
+const VARIANT_FIELDS = {
+  method: { label: 'שיטה', options: { rashi: 'רש"י', rt: 'ר"ת' } },
+  leather: { label: 'סוג', options: { gassot: 'גסות', pshutim: 'פשוטים', dakot: 'דקות', parshiot_only: 'פרשיות בלי בתים' } },
+  form: { label: 'מצב', options: { rolled: 'בבתים (סגורות)', open: 'פתוחות' } },
+};
+const VARIANT_BY_ITEM_TYPE = {
+  tefillin_pair: ['method', 'leather'], tefillin_head: ['method', 'leather'], tefillin_hand: ['method', 'leather'],
+  mezuzah: ['form'],
+};
+// שדות בחירה לפי סוג הפריט; ברירת מחדל "לא צוין" (= לא נשלח לספק, הוא משלים אצלו)
+function variantFieldsHtml(itemType, variant, disabled){
+  return (VARIANT_BY_ITEM_TYPE[itemType] || []).map(key => {
+    const f = VARIANT_FIELDS[key];
+    const current = variant && variant[key];
+    return '<div class="field"><label>' + f.label + '</label><select class="variantSel" data-key="' + key + '"' + (disabled ? ' disabled' : '') + '>' +
+      '<option value="">לא צוין</option>' +
+      Object.entries(f.options).map(([v, label]) => '<option value="' + v + '"' + (v === current ? ' selected' : '') + '>' + label + '</option>').join('') +
+      '</select></div>';
+  }).join('');
+}
+function readVariant(container){
+  const out = {};
+  container.querySelectorAll('.variantSel').forEach(sel => { if (sel.value) out[sel.dataset.key] = sel.value; });
+  return Object.keys(out).length ? out : null;
+}
+function variantText(variant){
+  if (!variant) return '';
+  return Object.entries(variant).map(([k, v]) => (VARIANT_FIELDS[k] && VARIANT_FIELDS[k].options[v]) || v).join(' · ');
+}
 const bagsEl = document.getElementById('bags');
 const tpl = document.getElementById('bagTpl');
 let bagCount = 0;
@@ -414,6 +447,11 @@ function addBag(){
   node.querySelector('.remove').addEventListener('click', (e) => {
     e.target.closest('.bag').remove();
   });
+  const typeSel = node.querySelector('.itemType');
+  const variantRow = node.querySelector('.variant-row');
+  const renderVariant = () => { variantRow.innerHTML = variantFieldsHtml(typeSel.value, null, false); };
+  typeSel.addEventListener('change', renderVariant);
+  renderVariant();
   bagsEl.appendChild(node);
 }
 document.getElementById('addBag').onclick = addBag;
@@ -479,6 +517,7 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
     item_type: b.querySelector('.itemType').value,
     item_type_note: b.querySelector('.note')?.value || null,
     quantity: +b.querySelector('.qty').value || 1,
+    variant: readVariant(b),
   }));
   if (bags.length === 0) { msg.className = 'msg err'; msg.textContent = 'צריך לפחות שקית אחת.'; return; }
   // כתובת לא חובה — מזהירים ומאפשרים להמשיך
@@ -603,7 +642,8 @@ async function loadList(){
     syncSmsAlerts();
     listEl.innerHTML = data.bags.map(b => {
       const when = (b.created_at_hebrew ? b.created_at_hebrew + ' · ' : '') + new Date(b.created_at).toLocaleDateString('he-IL');
-      const item = (ITEM_LABELS[b.item_type] || b.item_type) + (b.quantity > 1 ? ' ×' + b.quantity : '');
+      const item = (ITEM_LABELS[b.item_type] || b.item_type) + (b.quantity > 1 ? ' ×' + b.quantity : '') +
+        (b.variant ? ' (' + variantText(b.variant) + ')' : '');
       const collectionInfo = b.collection_number
         ? ' · איסוף #' + b.collection_number + ' (' + new Date(b.collection_started_at).toLocaleDateString('he-IL') + ')'
         : '';
@@ -686,11 +726,16 @@ function renderEdit(data){
       '<div class="field"><label>כמות</label><input type="number" class="editQty" data-code="' + b.bag_code + '" value="' + b.quantity + '" min="1"' + (editLocked ? ' disabled' : '') + '></div>' +
       '<div class="field"><label>הערות</label><input class="editNote" data-code="' + b.bag_code + '" placeholder="הערה לשקית (לא חובה)" value="' + esc(b.item_type_note || '') + '"' + (editLocked ? ' disabled' : '') + '></div>' +
       '</div>' +
+      '<div class="variant-row" data-code="' + b.bag_code + '">' + variantFieldsHtml(b.item_type, b.variant, editLocked) + '</div>' +
       '<div class="hidden report-box" id="report-' + b.bag_code + '"></div>' +
       '<div class="hidden" id="history-' + b.bag_code + '" style="display:flex;flex-direction:column;gap:5px;border-top:1px solid var(--border);padding-top:8px;"></div>' +
       '</div>';
   }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:12px;">אין שקיות בהזמנה זו</div>';
 
+  document.querySelectorAll('.editItemType').forEach(sel => sel.addEventListener('change', () => {
+    const row = document.querySelector('.variant-row[data-code="' + sel.dataset.code + '"]');
+    row.innerHTML = variantFieldsHtml(sel.value, readVariant(row), false);
+  }));
   document.querySelectorAll('.editDelBag').forEach(btn => btn.addEventListener('click', async () => {
     if (!confirm('למחוק את שקית ' + btn.dataset.code + '?')) return;
     try {
@@ -810,7 +855,8 @@ document.getElementById('editSave').addEventListener('click', async () => {
     const code = sel.dataset.code;
     const qty = document.querySelector('.editQty[data-code="' + code + '"]').value;
     const note = document.querySelector('.editNote[data-code="' + code + '"]').value;
-    return { bag_code: code, item_type: sel.value, item_type_note: note || null, quantity: +qty || 1 };
+    const variant = readVariant(document.querySelector('.variant-row[data-code="' + code + '"]'));
+    return { bag_code: code, item_type: sel.value, item_type_note: note || null, quantity: +qty || 1, variant };
   });
   const body = {
     customer: {

@@ -6,6 +6,7 @@ import { toHebrewDate } from "../lib/hebrewDate.js";
 import { sendSms } from "../lib/call2all.js";
 import { logActivity, snapshotBagStates, BAG_STATE_FIELDS } from "../lib/activityLog.js";
 import { getSetting, setSetting } from "../lib/settings.js";
+import { cleanVariant, variantText } from "../lib/variant.js";
 
 export const router = express.Router();
 // ללא אימות בכוונה — החלטת החנות: מי שיש לו גישה לאתר יכול ליצור הזמנות, בלי קוד API.
@@ -65,7 +66,8 @@ function printBagLabel(order_number, customer, bag) {
     `${customer.first_name} ${customer.last_name}`,
     customer.phone,
     toHebrewDate(new Date()),
-    `${ITEM_TYPE_LABELS[bag.item_type] || bag.item_type}${bag.quantity > 1 ? ` ×${bag.quantity}` : ""}`,
+    `${ITEM_TYPE_LABELS[bag.item_type] || bag.item_type}${bag.quantity > 1 ? ` ×${bag.quantity}` : ""}` +
+      (bag.variant ? ` · ${variantText(bag.variant)}` : ""),
   ].join("\n");
   enqueuePrint({ text, barcode: bag.bag_code, copies: 1 }).catch((e) => {
     console.error("enqueuePrint failed", bag.bag_code, e.message);
@@ -98,6 +100,9 @@ router.post("/", asyncHandler(async (req, res) => {
       res.status(400).json({ error: `item_type לא תקין: ${b.item_type}` });
       return;
     }
+    const v = cleanVariant(b.item_type, b.variant);
+    if (v.error) { res.status(400).json({ error: v.error }); return; }
+    b.variant = v.variant;
   }
 
   const client = await pool.connect();
@@ -139,9 +144,9 @@ router.post("/", asyncHandler(async (req, res) => {
       const b = bags[i];
       const bagCode = makeBagCode(order_number, i + 1);
       const r = await client.query(
-        `insert into bags (order_id, bag_code, item_type, item_type_note, quantity)
-         values ($1,$2,$3,$4,$5) returning bag_code, item_type, quantity`,
-        [orderId, bagCode, b.item_type, b.item_type_note || null, b.quantity || 1]
+        `insert into bags (order_id, bag_code, item_type, item_type_note, quantity, variant)
+         values ($1,$2,$3,$4,$5,$6) returning bag_code, item_type, quantity, variant`,
+        [orderId, bagCode, b.item_type, b.item_type_note || null, b.quantity || 1, b.variant ? JSON.stringify(b.variant) : null]
       );
       createdBags.push(r.rows[0]);
     }
@@ -247,7 +252,7 @@ router.get("/bags", asyncHandler(async (req, res) => {
 
   const { rows } = await pool.query(
     `select o.order_number, o.brought_by, c.first_name, c.last_name, c.phone,
-            b.bag_code, b.item_type, b.item_type_note, b.quantity, b.status,
+            b.bag_code, b.item_type, b.item_type_note, b.quantity, b.variant, b.status,
             b.picked_up_at, b.imported_at, b.returned_at, b.customer_notified_at, b.customer_collected_at, b.created_at,
             (select max(r.received_at) from bag_reports r where r.bag_id = b.id) as report_received_at,
             col.collection_number, col.started_at as collection_started_at
@@ -609,7 +614,7 @@ router.get("/:order_number", asyncHandler(async (req, res) => {
     return;
   }
   const bags = await pool.query(
-    `select bag_code, item_type, item_type_note, quantity, status, result, picked_up_at, returned_at, imported_at,
+    `select bag_code, item_type, item_type_note, quantity, variant, status, result, picked_up_at, returned_at, imported_at,
             customer_notified_at, customer_collected_at,
             (select max(r.received_at) from bag_reports r where r.bag_id = bags.id) as report_received_at
      from bags where order_id = $1 order by bag_code`,
@@ -656,9 +661,14 @@ router.put("/:order_number", asyncHandler(async (req, res) => {
       res.status(400).json({ error: `item_type לא תקין: ${b.item_type}` });
       return;
     }
+    const v = cleanVariant(b.item_type, b.variant);
+    if (v.error) {
+      res.status(400).json({ error: v.error });
+      return;
+    }
     await pool.query(
-      "update bags set item_type=$1, item_type_note=$2, quantity=$3, updated_at=now() where bag_code=$4 and order_id=$5",
-      [b.item_type, b.item_type_note || null, b.quantity || 1, b.bag_code, orderId]
+      "update bags set item_type=$1, item_type_note=$2, quantity=$3, variant=$4, updated_at=now() where bag_code=$5 and order_id=$6",
+      [b.item_type, b.item_type_note || null, b.quantity || 1, v.variant ? JSON.stringify(v.variant) : null, b.bag_code, orderId]
     );
   }
 
@@ -671,6 +681,11 @@ router.post("/:order_number/bags", asyncHandler(async (req, res) => {
   const { item_type, item_type_note, quantity } = req.body || {};
   if (!ITEM_TYPES.includes(item_type)) {
     res.status(400).json({ error: `item_type לא תקין: ${item_type}` });
+    return;
+  }
+  const cleaned = cleanVariant(item_type, req.body.variant);
+  if (cleaned.error) {
+    res.status(400).json({ error: cleaned.error });
     return;
   }
   const o = await pool.query(
@@ -696,9 +711,9 @@ router.post("/:order_number/bags", asyncHandler(async (req, res) => {
   const bagCode = makeBagCode(order.order_number, nextIndex);
 
   const r = await pool.query(
-    `insert into bags (order_id, bag_code, item_type, item_type_note, quantity)
-     values ($1,$2,$3,$4,$5) returning bag_code, item_type, item_type_note, quantity, status`,
-    [order.id, bagCode, item_type, item_type_note || null, quantity || 1]
+    `insert into bags (order_id, bag_code, item_type, item_type_note, quantity, variant)
+     values ($1,$2,$3,$4,$5,$6) returning bag_code, item_type, item_type_note, quantity, status, variant`,
+    [order.id, bagCode, item_type, item_type_note || null, quantity || 1, cleaned.variant ? JSON.stringify(cleaned.variant) : null]
   );
   const bag = r.rows[0];
   printBagLabel(order.order_number, order, bag);
@@ -788,7 +803,7 @@ router.put("/bags/:bag_code/force-status", asyncHandler(async (req, res) => {
 // עדיין), או שהמדבקה הפיזית אבדה/נקרעה. מותר גם על הזמנה נעולה — לא משנה שום מצב, רק מדפיס שוב.
 router.post("/bags/:bag_code/reprint", asyncHandler(async (req, res) => {
   const { rows } = await pool.query(
-    `select b.bag_code, b.item_type, b.quantity, o.order_number, c.first_name, c.last_name, c.phone
+    `select b.bag_code, b.item_type, b.quantity, b.variant, o.order_number, c.first_name, c.last_name, c.phone
      from bags b join orders o on o.id = b.order_id join customers c on c.id = o.customer_id
      where b.bag_code = $1`,
     [req.params.bag_code]

@@ -12,7 +12,7 @@ const COLLECTION_WINDOW_MS = 30 * 60 * 1000; // חלון קיבוץ לאיסוף
 
 const BAG_SELECT = `
   select b.*, o.order_number, o.notes as order_notes, o.brought_by,
-         c.first_name, c.last_name, c.phone, c.address,
+         c.first_name, c.last_name, c.phone, c.address, c.supplier_customer_number,
          col.collection_number, col.started_at as collection_started_at,
          (select max(r.received_at) from bag_reports r where r.bag_id = b.id) as report_received_at
   from bags b
@@ -42,6 +42,8 @@ function serializeBag(bag) {
     item_type: bag.item_type,
     item_type_note: bag.item_type_note,
     quantity: bag.quantity,
+    // פרטי הפריט בקודים המוסכמים עם הספק (lib/variant.js); null = לא נשאל כלום בקבלה
+    variant: bag.variant || null,
     picked_up_at: bag.picked_up_at,
     imported_at: bag.imported_at,
     returned_at: bag.returned_at,
@@ -53,6 +55,8 @@ function serializeBag(bag) {
       last_name: bag.last_name,
       phone: bag.phone,
       address: bag.address,
+      // מספר הלקוח אצל הספק (customer-link) — כדי שהשקית תיכנס אצלו ישר לכרטיס הנכון, גם אם הלקוח החליף טלפון
+      supplier_customer_number: bag.supplier_customer_number || null,
     },
   };
 }
@@ -275,20 +279,42 @@ router.get("/report/:code", asyncHandler(async (req, res) => {
   res.json({ bag_code: bag.bag_code, reports: rows });
 }));
 
+// מספר הלקוח אצל הספק. עדיף לפי שקית — {bag_code, customer_number}: מעדכן רק את הלקוח של ההזמנה של אותה שקית,
+// בלי תלות בטלפון (ובלי לפגוע בלקוחות אחרים עם אותו טלפון, למשל מי ש"הביא" פריטים). אפשרות ישנה לפי טלפון —
+// {phone, customer_number}: משווה לפי ספרות בלבד (050-1234567 = 0501234567) ומעדכן את כל הלקוחות עם אותו טלפון.
 router.post("/customer-link", asyncHandler(async (req, res) => {
-  const { phone, customer_number } = req.body || {};
-  if (!phone || !customer_number) {
-    res.status(400).json({ error: "phone ו-customer_number נדרשים" });
+  const { phone, bag_code, customer_number } = req.body || {};
+  if (!customer_number || (!phone && !bag_code)) {
+    res.status(400).json({ error: "customer_number נדרש, יחד עם bag_code (מועדף) או phone" });
     return;
   }
-  const { rows } = await pool.query(
-    "update customers set supplier_customer_number = $2 where phone = $1 returning id",
-    [phone, customer_number]
-  );
+  const number = String(customer_number).trim();
+  let rows;
+  if (bag_code) {
+    ({ rows } = await pool.query(
+      `update customers set supplier_customer_number = $2
+       where id = (select o.customer_id from bags b join orders o on o.id = b.order_id where b.bag_code = $1)
+       returning id`,
+      [String(bag_code), number]
+    ));
+    if (rows.length === 0) {
+      res.status(404).json({ error: "קוד שקית לא מוכר" });
+      return;
+    }
+    const bag = await loadBag(String(bag_code));
+    logActivity(bag.bag_code, bag.order_number, "customer_linked", `customer_number=${number}`);
+    res.json({ ok: true, updated: rows.length });
+    return;
+  }
+  const digits = String(phone).replace(/\D/g, "");
+  ({ rows } = await pool.query(
+    "update customers set supplier_customer_number = $2 where regexp_replace(phone, '\\D', '', 'g') = $1 returning id",
+    [digits, number]
+  ));
   if (rows.length === 0) {
     res.status(404).json({ error: "לא נמצא לקוח עם הטלפון הזה אצלנו" });
     return;
   }
-  logActivity(null, null, "customer_linked", `phone=${phone} customer_number=${customer_number}`);
-  res.json({ ok: true });
+  logActivity(null, null, "customer_linked", `phone=${phone} customer_number=${number}`);
+  res.json({ ok: true, updated: rows.length });
 }));

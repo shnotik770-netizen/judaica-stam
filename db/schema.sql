@@ -133,3 +133,8 @@ create index if not exists idx_bag_reports_bag on bag_reports(bag_id, received_a
 -- "הובא ע"י" — מי הביא את הפריטים לחנות בשם הלקוח (לא חובה). כשמולא, ההזמנה לא משויכת ללקוח קיים
 -- לפי טלפון (תמיד נוצר לקוח חדש) — כי הטלפון שנמסר עלול להיות של המביא ולא של בעל הפריטים.
 alter table orders add column if not exists brought_by text;
+
+-- פרטי הפריט לפי "שפה משותפת" עם יודאיקה פלוס (מסמך של מיכאל, 07.10.2026) — קודים קבועים, רק מה שנשאל בקבלה:
+-- תפילין: {"method": "rashi"|"rt", "leather": "gassot"|"pshutim"|"dakot"|"parshiot_only"}; מזוזה: {"form": "rolled"|"open"}.
+-- null = לא נשאל כלום. נשלח לספק כמו שהוא בשדה variant (ראו lib/variant.js, SUPPLIER_API.md).
+alter table bags add column if not exists variant jsonb;

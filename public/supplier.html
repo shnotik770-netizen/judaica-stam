@@ -361,10 +361,21 @@ function matchesSearch(b, q){
   return hay.includes(q);
 }
 const STAGE_LABELS = { collected: 'אספתי', imported: 'נכנס לתוכנה', returning: 'במסירה לחנות' };
+// פרטי הפריט (variant) בקודים המוסכמים — תצוגה בלבד, כמו ב-/orders.html ו-lib/variant.js
+const VARIANT_LABELS = {
+  method: { rashi: 'רש"י', rt: 'ר"ת' },
+  leather: { gassot: 'גסות', pshutim: 'פשוטים', dakot: 'דקות', parshiot_only: 'פרשיות בלי בתים' },
+  form: { rolled: 'בבתים (סגורות)', open: 'פתוחות' },
+};
+function variantText(variant){
+  if (!variant) return '';
+  return Object.entries(variant).map(([k, v]) => (VARIANT_LABELS[k] && VARIANT_LABELS[k][v]) || v).join(' · ');
+}
 function renderRows(bags, extraLine, clickable, withHistory){
   return bags.map(b => {
     const who = esc(b.customer.first_name) + ' ' + esc(b.customer.last_name);
-    const item = (ITEM_LABELS[b.item_type] || b.item_type) + (b.quantity > 1 ? ' ×' + b.quantity : '');
+    const item = (ITEM_LABELS[b.item_type] || b.item_type) + (b.quantity > 1 ? ' ×' + b.quantity : '') +
+      (b.variant ? ' (' + variantText(b.variant) + ')' : '');
     const noteInfo = b.item_type_note ? ' · 📝 ' + esc(b.item_type_note) : '';
     const broughtInfo = b.brought_by ? ' · הובא ע"י ' + esc(b.brought_by) : '';
     const histBtn = withHistory && !clickable
