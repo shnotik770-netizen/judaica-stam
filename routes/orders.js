@@ -570,6 +570,7 @@ router.get("/customers", asyncHandler(async (req, res) => {
   if (q) {
     params.push(`%${q}%`);
     where = `where c.first_name ilike $1 or c.last_name ilike $1 or c.phone ilike $1 or c.address ilike $1
+                or c.supplier_customer_number ilike $1
                 or (c.first_name || ' ' || c.last_name) ilike $1`;
   }
   const { rows } = await pool.query(

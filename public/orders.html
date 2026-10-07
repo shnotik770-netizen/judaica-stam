@@ -365,7 +365,7 @@
         <b>מאגר לקוחות</b>
         <button class="reload" id="reloadCustomers">רענן</button>
       </div>
-      <input id="customerSearch" placeholder="חיפוש לפי שם / טלפון / כתובת (ריק = הכל)">
+      <input id="customerSearch" placeholder="חיפוש לפי שם / טלפון / כתובת / מס' לקוח אצל מיכאל (ריק = הכל)">
       <div class="sub" style="margin:0;" id="customerCount"></div>
       <div id="customersList" style="display:flex;flex-direction:column;gap:7px;max-height:55vh;overflow-y:auto;"></div>
     </div>
@@ -1369,13 +1369,15 @@ async function loadCustomers(){
     countEl.textContent = data.customers.length + ' לקוחות';
     listEl.innerHTML = data.customers.map(c => {
       const last = c.last_order_at ? ' · הזמנה אחרונה ' + new Date(c.last_order_at).toLocaleDateString('he-IL') : '';
-      const supplierNo = c.supplier_customer_number ? ' · מס\' לקוח אצל הספק: ' + esc(c.supplier_customer_number) : '';
+      // מספר הלקוח אצל מיכאל — בולט ליד השם (תג קטן), רק אם קיים
+      const supplierNo = c.supplier_customer_number
+        ? ' <span class="badge" style="background:var(--accent-soft);color:var(--accent);font-weight:700;">לקוח #' + esc(c.supplier_customer_number) + ' אצל מיכאל</span>' : '';
       const awaiting = c.awaiting_customer_count > 0
         ? '<span class="badge notified">' + c.awaiting_customer_count + ' מחכים לאיסוף</span>'
         : '<span class="badge" style="background:var(--surface-2);color:var(--text-muted);">' + c.order_count + ' הזמנות</span>';
       return '<div class="bag-row" data-phone="' + esc(c.phone) + '" style="cursor:pointer;">' +
-        '<div><div class="who">' + esc(c.first_name) + ' ' + esc(c.last_name) + ' · ' + esc(c.phone) + '</div>' +
-        '<div class="sub">' + esc(c.address || '') + ' · ' + c.order_count + ' הזמנות, ' + c.bag_count + ' שקיות' + last + supplierNo + '</div></div>' +
+        '<div><div class="who">' + esc(c.first_name) + ' ' + esc(c.last_name) + ' · ' + esc(c.phone) + supplierNo + '</div>' +
+        '<div class="sub">' + esc(c.address || '') + ' · ' + c.order_count + ' הזמנות, ' + c.bag_count + ' שקיות' + last + '</div></div>' +
         awaiting + '</div>';
     }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:20px;">אין לקוחות תואמים</div>';
     listEl.querySelectorAll('.bag-row').forEach(row => {
