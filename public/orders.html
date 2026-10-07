@@ -1026,23 +1026,36 @@ function setQuickModeTheme(type, title, hint){
   banner.querySelector('small').textContent = hint || '';
   banner.classList.remove('hidden');
 }
-function beep(freq, dur, delay){
+// AudioContext אחד לכל הדף (יצירת אחד חדש לכל צפצוף נתקלת במגבלת הדפדפן על מספר ההקשרים, ואז אין צליל בכלל)
+let audioCtx = null;
+function getAudioCtx(){
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+// הדפדפן מאפשר צליל רק אחרי פעולת משתמש — "מעירים" את ההקשר בלחיצה/הקשה הראשונה בדף
+['pointerdown', 'keydown'].forEach(ev => document.addEventListener(ev, () => { try { getAudioCtx(); } catch (e) {} }, { once: true }));
+function beep(freq, dur, delay, type, volume){
   try{
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = getAudioCtx();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     const start = ctx.currentTime + (delay || 0);
+    osc.type = type || 'sine';
     osc.frequency.value = freq;
     osc.connect(gain); gain.connect(ctx.destination);
-    gain.gain.setValueAtTime(0.2, start);
+    gain.gain.setValueAtTime(volume || 0.2, start);
+    gain.gain.setValueAtTime(0, start + dur); // סיום חד, בלי "קליק" שנשאר
     osc.start(start);
-    osc.stop(start + dur);
+    osc.stop(start + dur + 0.02);
   }catch(e){}
 }
-// צליל הצלחה: צפצוף גבוה וקצר. צליל שגיאה (קוד לא מוכר / לא ברשימה / כבר סומן וכו'): שני צפצופים נמוכים וארוכים —
-// כדי שאפשר לדעת בלי להסתכל על המסך. אחרי סריקה, אם הופיעה שורה אדומה (flashScan 'warn') — צליל שגיאה.
+// צליל הצלחה: צפצוף גבוה וקצר. צליל שגיאה (קוד לא מוכר / לא ברשימה / כבר סומן וכו'): זמזום ארוך ומעצבן (~1.2 שניות)
+// בגל מרובע בתדרים שרמקולי טלפון/מחשב משמיעים היטב, עם תדר מתחלף — כדי שאי אפשר לפספס בלי להסתכל על המסך.
 function beepOk(){ beep(880, 0.15); }
-function beepError(){ beep(300, 0.2); beep(200, 0.35, 0.25); }
+function beepError(){
+  for (let i = 0; i < 6; i++) beep(i % 2 ? 440 : 620, 0.2, i * 0.2, 'square', 0.35);
+}
 let scanHadError = false;
 function scanResultBeep(){ if (scanHadError) beepError(); else beepOk(); scanHadError = false; }
 function addActionLog(kind, title, detail){
