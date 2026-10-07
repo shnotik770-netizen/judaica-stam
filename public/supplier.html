@@ -152,6 +152,7 @@
         <option value="">כל המצבים</option>
         <option value="collected">אספתי</option>
         <option value="imported">נכנס לתוכנה</option>
+        <option value="ready">מוכן — שוחרר מהתוכנה</option>
         <option value="returning">במסירה לחנות</option>
       </select>
       <input class="search" id="mineCollection" type="number" placeholder="מספר איסוף">
@@ -360,7 +361,7 @@ function matchesSearch(b, q){
     (b.customer.address || '') + ' ' + b.bag_code + ' ' + b.order_number).toLowerCase();
   return hay.includes(q);
 }
-const STAGE_LABELS = { collected: 'אספתי', imported: 'נכנס לתוכנה', returning: 'במסירה לחנות' };
+const STAGE_LABELS = { collected: 'אספתי', imported: 'נכנס לתוכנה', ready: 'מוכן — שוחרר מהתוכנה', returning: 'במסירה לחנות' };
 // פרטי הפריט (variant) בקודים המוסכמים — תצוגה בלבד, כמו ב-/orders.html ו-lib/variant.js
 const VARIANT_LABELS = {
   method: { rashi: 'רש"י', rt: 'ר"ת' },
@@ -510,13 +511,13 @@ function addQuickLog(kind, title, detail){
   document.getElementById('actionLog').appendChild(el);
 }
 
-async function applyQuickAction(bag_codes){
+async function applyQuickAction(bag_codes, force){
   if (!quickAction) return;
   try {
     const res = await fetch('/api/supplier/bulk-scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bag_codes, action: quickAction.type }),
+      body: JSON.stringify({ bag_codes, action: quickAction.type, force: !!force }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -524,12 +525,24 @@ async function applyQuickAction(bag_codes){
       flashScan('warn', bag_codes.join(', '), '', data.error || 'שגיאה');
       beep(220, 0.3);
     } else {
+      const unconfirmed = [];
       (data.results || []).forEach(r => {
+        // מסירה לחנות של שקית שהתוכנה עוד לא שחררה (בלי דוח) — שואלים, ושולחים שוב עם force רק באישור
+        if (!r.ok && r.needs_confirm) { unconfirmed.push(r.bag_code); return; }
         if (!r.ok) { addQuickLog('warn', r.bag_code, r.error || 'שגיאה'); flashScan('warn', r.bag_code, '', r.error || 'שגיאה'); return; }
         const who = r.bag.customer.first_name + ' ' + r.bag.customer.last_name;
         addQuickLog('ok', who, r.bag.bag_code + ' · הזמנה #' + r.bag.order_number);
         flashScan('ok', r.bag.bag_code, itemText(r.bag.item_type, r.bag.quantity), quickAction.type === 'pickup' ? '✓ נאסף' : '✓ הוחזר לחנות', who);
       });
+      if (unconfirmed.length) {
+        if (confirm('שים לב: ' + (unconfirmed.length > 1 ? 'השקיות ' + unconfirmed.join(', ') + ' לא דווחו' : 'שקית ' + unconfirmed[0] + ' לא דווחה') +
+            ' כנבדקה (אין דוח מהתוכנה).\nלמסור לחנות בכל זאת?')) {
+          await applyQuickAction(unconfirmed, true);
+          return;
+        }
+        unconfirmed.forEach(c => addQuickLog('warn', c, 'לא נמסרה — לא דווחה כנבדקה'));
+        flashScan('warn', unconfirmed.join(', '), '', 'לא נמסר — לא דווח כנבדק');
+      }
       beep(880, 0.15);
     }
   } catch (err) {
@@ -631,10 +644,10 @@ document.getElementById('quickCameraSwitch').addEventListener('click', switchQui
 // מחיקה מחזירה את השקית למצב שלפני אותה פעולה (DELETE /api/orders/activity-log/:id, ראו README).
 const SUPPLIER_LOG_LABELS = {
   order_created: 'הזמנה נוצרה', bag_added: 'שקית נוספה', label_reprinted: 'מדבקה הודפסה שוב',
-  report_received: '📋 נשלח דוח', picked_up: 'נאסף ע"י מיכאל', returned: 'הוחזר ממיכאל', customer_notified: 'עודכן ללקוח',
+  report_received: '📋 נשלח דוח', released: 'מוכן — שוחרר מהתוכנה', picked_up: 'נאסף ע"י מיכאל', returned: 'הוחזר ממיכאל', customer_notified: 'עודכן ללקוח',
   customer_collected: 'נאסף ע"י לקוח', manual_fix: 'תיקון ידני (חנות)', print_failed: 'הדפסת מדבקה נכשלה',
 };
-const SUPPLIER_EDITABLE_ACTIONS = new Set(['picked_up', 'returned']);
+const SUPPLIER_EDITABLE_ACTIONS = new Set(['picked_up', 'released', 'returned']);
 function logWhenHtml(entry){
   const d = new Date(entry.created_at);
   const greg = d.toLocaleDateString('he-IL') + ' ' + d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });

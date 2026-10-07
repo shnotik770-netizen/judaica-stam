@@ -209,6 +209,7 @@ router.get("/customer-search", asyncHandler(async (req, res) => {
 // סטטוס "חזר" מתפצל ל-3 תתי-מצב לצורך סינון (לא עמודה אמיתית — b.status נשאר 'returned' תמיד,
 // ראו routes/orders.js POST /scan). not_collected משמש פנימית בצד הלקוח (סריקה ללקוח, מטרת "איסוף").
 const BAG_STATUS_CONDITIONS = {
+  ready: "b.status = 'with_supplier' and b.ready_at is not null",
   returned_at_store: "b.status = 'returned' and b.customer_notified_at is null",
   notified: "b.status = 'returned' and b.customer_notified_at is not null and b.customer_collected_at is null",
   not_collected: "b.status = 'returned' and b.customer_collected_at is null",
@@ -218,6 +219,9 @@ const BAG_STATUS_CONDITIONS = {
 // סיכום מהיר — "X ממתינים לאיסוף, X אצל מיכאל" — מוצג מיד בכניסה לטאב "כל ההזמנות".
 router.get("/summary", asyncHandler(async (req, res) => {
   const { rows } = await pool.query("select status, count(*)::int as count from bags group by status");
+  const { rows: readyRows } = await pool.query(
+    "select count(*)::int as count from bags where status = 'with_supplier' and ready_at is not null"
+  );
   const counts = Object.fromEntries(rows.map((r) => [r.status, r.count]));
   const { rows: failRows } = await pool.query(
     "select count(*)::int as count from activity_log where action = 'print_failed' and created_at > now() - interval '24 hours'"
@@ -225,6 +229,7 @@ router.get("/summary", asyncHandler(async (req, res) => {
   res.json({
     waiting_pickup: counts.waiting_pickup || 0,
     with_supplier: counts.with_supplier || 0,
+    ready: readyRows[0]?.count || 0, // מתוך with_supplier — שוחררו מהתוכנה של מיכאל ומחכים למסירה לחנות
     print_failures_24h: failRows[0]?.count || 0,
   });
 }));
@@ -253,7 +258,7 @@ router.get("/bags", asyncHandler(async (req, res) => {
   const { rows } = await pool.query(
     `select o.order_number, o.brought_by, c.first_name, c.last_name, c.phone,
             b.bag_code, b.item_type, b.item_type_note, b.quantity, b.variant, b.status,
-            b.picked_up_at, b.imported_at, b.returned_at, b.customer_notified_at, b.customer_collected_at, b.created_at,
+            b.picked_up_at, b.imported_at, b.ready_at, b.returned_at, b.customer_notified_at, b.customer_collected_at, b.created_at,
             (select max(r.received_at) from bag_reports r where r.bag_id = b.id) as report_received_at,
             col.collection_number, col.started_at as collection_started_at
      from bags b
@@ -413,9 +418,9 @@ const withHebrewDates = (rows) => rows.map((r) => ({ ...r, created_at_hebrew: to
 
 // פעולות שמשנות את מצב השקית — מחיקה שלהן מההיסטוריה מחזירה את השקית למצב שלפניהן.
 // (השוואות זמן נעשות ב-SQL מול השורה עצמה: Date של JS מאבד את המיקרו-שניות של timestamptz.)
-const STATE_ACTIONS = ["picked_up", "returned", "customer_notified", "customer_collected", "manual_fix"];
+const STATE_ACTIONS = ["picked_up", "released", "returned", "customer_notified", "customer_collected", "manual_fix"];
 const STATE_ACTION_LABELS = {
-  picked_up: "נאסף ע\"י מיכאל", returned: "הוחזר ממיכאל", customer_notified: "עודכן ללקוח",
+  picked_up: "נאסף ע\"י מיכאל", released: "מוכן אצל מיכאל (שוחרר מהתוכנה)", returned: "הוחזר ממיכאל", customer_notified: "עודכן ללקוח",
   customer_collected: "נאסף ע\"י לקוח", manual_fix: "תיקון ידני",
   label_reprinted: "מדבקה הודפסה שוב", print_failed: "הדפסה נכשלה", bag_added: "שקית נוספה",
 };
@@ -426,8 +431,10 @@ async function derivePrevState(client, row) {
   switch (row.action) {
     case "picked_up":
       return { status: "waiting_pickup", collection_id: null, picked_up_at: null, imported_at: null };
+    case "released":
+      return { ready_at: null };
     case "returned":
-      return { status: "with_supplier", returned_at: null, result: null, customer_notified_at: null, customer_collected_at: null };
+      return { status: "with_supplier", returned_at: null, customer_notified_at: null, customer_collected_at: null };
     case "customer_notified": {
       const { rows } = await client.query(
         `select created_at from activity_log where bag_code = $1 and action = 'customer_notified' and id <> $2
@@ -614,7 +621,7 @@ router.get("/:order_number", asyncHandler(async (req, res) => {
     return;
   }
   const bags = await pool.query(
-    `select bag_code, item_type, item_type_note, quantity, variant, status, result, picked_up_at, returned_at, imported_at,
+    `select bag_code, item_type, item_type_note, quantity, variant, status, result, picked_up_at, returned_at, imported_at, ready_at,
             customer_notified_at, customer_collected_at,
             (select max(r.received_at) from bag_reports r where r.bag_id = bags.id) as report_received_at
      from bags where order_id = $1 order by bag_code`,

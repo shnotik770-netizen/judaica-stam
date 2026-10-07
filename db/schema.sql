@@ -138,3 +138,7 @@ alter table orders add column if not exists brought_by text;
 -- תפילין: {"method": "rashi"|"rt", "leather": "gassot"|"pshutim"|"dakot"|"parshiot_only"}; מזוזה: {"form": "rolled"|"open"}.
 -- null = לא נשאל כלום. נשלח לספק כמו שהוא בשדה variant (ראו lib/variant.js, SUPPLIER_API.md).
 alter table bags add column if not exists variant jsonb;
+
+-- "מוכן אצל מיכאל": התוכנה של הספק סיימה את הבדיקה ושלחה דוח (POST /api/supplier/report) — השקית שוחררה
+-- מהתוכנה אבל עדיין פיזית אצלו. רק "מסירה לחנות" (bulk-scan return) מעבירה ל-returned, כדי שנדע שהגיעה לחנות.
+alter table bags add column if not exists ready_at timestamptz;

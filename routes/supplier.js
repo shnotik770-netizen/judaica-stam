@@ -29,6 +29,7 @@ async function loadBag(code) {
 // שלב תצוגה למסך "מה אצלי": אספתי (עוד לא נמשך ע"י התוכנה) / נכנס לתוכנה (נמשך) / במסירה לחנות (כבר הוחזר).
 function bagStage(bag) {
   if (bag.status === "returned") return "returning";
+  if (bag.ready_at) return "ready"; // התוכנה שלו שלחה דוח ושחררה — מוכן אצלו, עוד לא נמסר לחנות
   return bag.imported_at ? "imported" : "collected";
 }
 
@@ -46,6 +47,7 @@ function serializeBag(bag) {
     variant: bag.variant || null,
     picked_up_at: bag.picked_up_at,
     imported_at: bag.imported_at,
+    ready_at: bag.ready_at || null,
     returned_at: bag.returned_at,
     report_received_at: bag.report_received_at || null, // null = עוד לא נשלח דוח על השקית
     collection_number: bag.collection_number || null,
@@ -183,7 +185,7 @@ router.post("/scan", asyncHandler(async (req, res) => {
 // סימון מרובה מרשימה (במקום סריקה) — מיכאל יכול לעבור על "ממתין לאיסוף"/"מה אצלי" ולסמן
 // V על כמה שקיות בבת אחת, במקום לסרוק כל אחת. action נקבע לפי הרשימה שבה מסמנים (לא ניחוש).
 router.post("/bulk-scan", asyncHandler(async (req, res) => {
-  const { bag_codes, action } = req.body || {};
+  const { bag_codes, action, force } = req.body || {};
   if (!Array.isArray(bag_codes) || bag_codes.length === 0) {
     res.status(400).json({ error: "bag_codes נדרש" });
     return;
@@ -212,7 +214,12 @@ router.post("/bulk-scan", asyncHandler(async (req, res) => {
           results.push({ bag_code: code, ok: false, error: "השקית לא אצל הספק" });
           continue;
         }
-        await returnBag(bag, null);
+        // מסירה לחנות של שקית שהתוכנה של הספק עוד לא שחררה (אין דוח) — מותר, אבל רק אחרי אישור מפורש (force)
+        if (!bag.ready_at && !force) {
+          results.push({ bag_code: code, ok: false, needs_confirm: true, error: "שקית זו לא דווחה כנבדקה" });
+          continue;
+        }
+        await returnBag(bag, bag.result || null);
       }
       const fresh = await loadBag(code);
       results.push({ bag_code: code, ok: true, bag: serializeBag(fresh) });
@@ -226,8 +233,10 @@ router.post("/bulk-scan", asyncHandler(async (req, res) => {
 // הספק מדווח לנו מה מספר הלקוח שהוא שייך ללקוח הזה אצלו — נשמר לפי טלפון, ויוצע אוטומטית
 // בפעם הבאה שאותו טלפון מוזן אצלנו בהזמנה חדשה.
 // דוח מהתוכנה של הספק על שקית — פורמט חופשי (ראו SUPPLIER_API.md). גוף: דוח בודד
-// {bag_code, summary?, report?, mark_returned?} או כמה בבת אחת {reports: [...]}. report = כל JSON, נשמר כמו שהוא.
-// mark_returned:true גם מסמן את השקית כהוחזרה (אם היא אצל הספק) — כמו "מסירה לחנות", עם הדוח כ-result.
+// {bag_code, summary?, report?} או כמה בבת אחת {reports: [...]}. report = כל JSON, נשמר כמו שהוא.
+// דוח = השקית נבדקה ושוחררה מהתוכנה שלו: אם היא אצל הספק היא עוברת ל"מוכן אצל מיכאל" (ready_at) — אבל
+// *לא* מוחזרת לחנות. ההחזרה רק ב"מסירה לחנות" (bulk-scan return), כדי שנדע שהשקית באמת הגיעה פיזית.
+// mark_returned (מהגרסה הקודמת) מתקבל אבל כבר לא מחזיר — מתנהג כמו דוח רגיל.
 router.post("/report", asyncHandler(async (req, res) => {
   const body = req.body || {};
   const items = Array.isArray(body.reports) ? body.reports : [body];
@@ -237,7 +246,7 @@ router.post("/report", asyncHandler(async (req, res) => {
   }
   const results = [];
   for (const item of items) {
-    const { bag_code, summary, report, mark_returned } = item || {};
+    const { bag_code, summary, report } = item || {};
     if (!bag_code) { results.push({ bag_code: null, ok: false, error: "bag_code נדרש" }); continue; }
     if ((summary == null || String(summary).trim() === "") && report === undefined) {
       results.push({ bag_code, ok: false, error: "צריך summary או report (או שניהם)" });
@@ -255,12 +264,20 @@ router.post("/report", asyncHandler(async (req, res) => {
       [bag.id, cleanSummary, report === undefined ? null : JSON.stringify(report)]
     );
     logActivity(bag.bag_code, bag.order_number, "report_received", cleanSummary ? cleanSummary.slice(0, 200) : null);
-    let returned = false;
-    if (mark_returned && bag.status === "with_supplier") {
-      await returnBag(bag, report === undefined ? { summary: cleanSummary } : report);
-      returned = true;
+    let released = false;
+    if (bag.status === "with_supplier" && !bag.ready_at) {
+      const prev = (await snapshotBagStates([bag.bag_code])).get(bag.bag_code);
+      await pool.query(
+        "update bags set ready_at = now(), result = $2, updated_at = now() where id = $1",
+        [bag.id, report === undefined ? JSON.stringify({ summary: cleanSummary }) : JSON.stringify(report)]
+      );
+      logActivity(bag.bag_code, bag.order_number, "released", null, prev);
+      released = true;
     }
-    results.push({ bag_code: bag.bag_code, ok: true, report_id: rows[0].id, received_at: rows[0].received_at, returned });
+    results.push({
+      bag_code: bag.bag_code, ok: true, report_id: rows[0].id, received_at: rows[0].received_at,
+      released, returned: false, // returned נשאר תמיד false — ההחזרה רק ב"מסירה לחנות"
+    });
   }
   res.json({ results });
 }));

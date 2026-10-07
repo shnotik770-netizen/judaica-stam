@@ -168,6 +168,7 @@
   .report-item pre{white-space:pre-wrap;word-break:break-word;font-size:11.5px;margin:4px 0 0;}
   .variant-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
   .variant-row:empty{display:none;}
+  .badge.ready{background:#f3e8fd;color:#6a3fb5;}
 </style>
 </head>
 <body>
@@ -241,6 +242,7 @@
         <option value="">כל הסטטוסים</option>
         <option value="waiting_pickup">הוזמן</option>
         <option value="with_supplier">נאסף ע"י מיכאל</option>
+        <option value="ready">מוכן אצל מיכאל</option>
         <option value="returned_at_store">הגיע לחנות</option>
         <option value="notified">לקוח קיבל הודעה</option>
         <option value="collected">נאסף ע"י לקוח</option>
@@ -584,6 +586,8 @@ const STATUS_BADGE = {
 };
 function statusBadge(b){
   // אצל הספק: "נאסף" עד שהתוכנה של מיכאל מושכת אותה (imported_at, דרך GET /api/supplier/with-me)
+  // התוכנה של מיכאל שלחה דוח ושחררה — מוכן אצלו, עוד לא נמסר לחנות
+  if (b.status === 'with_supplier' && b.ready_at) return '<span class="badge ready">מוכן אצל מיכאל</span>';
   if (b.status === 'with_supplier' && b.imported_at) return '<span class="badge progress">בתוכנה של מיכאל</span>';
   if (b.status === 'returned' && b.customer_collected_at) return '<span class="badge collected">נאסף ע"י לקוח</span>';
   if (b.status === 'returned' && b.customer_notified_at) return '<span class="badge notified">עודכן ללקוח</span>';
@@ -596,7 +600,7 @@ async function loadSummary(){
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'שגיאה');
     document.getElementById('statusSummary').textContent =
-      data.waiting_pickup + ' ממתינים לאיסוף · ' + data.with_supplier + ' אצל מיכאל';
+      data.waiting_pickup + ' ממתינים לאיסוף · ' + data.with_supplier + ' אצל מיכאל' + (data.ready ? ' (' + data.ready + ' מוכנים)' : '');
     const banner = document.getElementById('printFailuresBanner');
     if (data.print_failures_24h > 0) {
       banner.textContent = '⚠️ ' + data.print_failures_24h + ' מדבקות לא הודפסו ב-24 השעות האחרונות — לחץ לפרטים בטאב "ניהול"';
@@ -778,7 +782,7 @@ function renderEdit(data){
 
 // היסטוריית שקית במסך העריכה. כל שורה ניתנת למחיקה — שורה של פעולה שמשנה מצב (איסוף/החזרה/עדכון/
 // איסוף לקוח/תיקון ידני) מחזירה את השקית למצב שלפניה (ראו DELETE /api/orders/activity-log/:id).
-const STATE_LOG_ACTIONS = new Set(['picked_up', 'returned', 'customer_notified', 'customer_collected', 'manual_fix']);
+const STATE_LOG_ACTIONS = new Set(['picked_up', 'released', 'returned', 'customer_notified', 'customer_collected', 'manual_fix']);
 async function loadBagHistory(code){
   const container = document.getElementById('history-' + code);
   container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">טוען…</div>';
@@ -1307,7 +1311,7 @@ document.getElementById('smsTemplateSave').addEventListener('click', async () =>
 const LOG_ACTION_LABELS = {
   order_created: 'הזמנה נוצרה', order_edited: 'הזמנה נערכה', order_deleted: 'הזמנה נמחקה',
   bag_added: 'שקית נוספה', bag_deleted: 'שקית נמחקה', label_reprinted: 'מדבקה הודפסה שוב',
-  picked_up: 'נאסף ע"י מיכאל', returned: 'הוחזר ממיכאל',
+  picked_up: 'נאסף ע"י מיכאל', released: 'מוכן אצל מיכאל (שוחרר מהתוכנה)', returned: 'הוחזר ממיכאל',
   customer_notified: 'עודכן ללקוח', customer_collected: 'נאסף ע"י לקוח',
   customer_linked: 'דווח מספר לקוח', manual_fix: 'תיקון ידני', settings_changed: 'הגדרה עודכנה',
   report_received: '📋 התקבל דוח ממיכאל', print_failed: '⚠️ הדפסת מדבקה נכשלה', sms_failed: '⚠️ SMS ללקוח לא נשלח',
