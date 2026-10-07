@@ -171,6 +171,11 @@
   .badge.ready{background:#f3e8fd;color:#6a3fb5;}
   button.more-types{background:none;border:none;color:var(--accent);font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer;padding:4px 0 0;}
   .supplier-note{background:var(--accent-soft);color:var(--text);border-right:3px solid var(--accent);border-radius:8px;padding:8px 10px;font-size:13px;}
+  .payments-box{border:1px solid var(--border);border-radius:11px;padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--surface-2);}
+  .pay-form{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .pay-form #payNote{grid-column:1 / -1;}
+  .pay-form #payAdd{grid-column:1 / -1;}
+  .pay-row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;background:var(--surface);border-radius:8px;padding:6px 10px;}
 </style>
 </head>
 <body>
@@ -315,6 +320,28 @@
 
     <div id="editBags" style="display:flex;flex-direction:column;gap:10px;"></div>
     <button type="button" class="btn-add" id="editAddBag">+ הוסף שקית</button>
+
+    <div class="payments-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <b>💰 תשלומים</b>
+        <span id="editPaidTotal" style="font-weight:700;color:var(--ok);"></span>
+      </div>
+      <div id="editPayments" style="display:flex;flex-direction:column;gap:5px;"></div>
+      <div class="pay-form">
+        <input id="payAmount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="סכום ₪">
+        <select id="payMethod">
+          <option value="מזומן">מזומן</option>
+          <option value="אשראי">אשראי</option>
+          <option value="העברה בנקאית">העברה בנקאית</option>
+          <option value="ביט">ביט</option>
+          <option value="פייבוקס">פייבוקס</option>
+          <option value="צ'ק">צ'ק</option>
+          <option value="אחר">אחר</option>
+        </select>
+        <input id="payNote" placeholder="הערה (לא חובה)">
+        <button type="button" class="btn-primary" id="payAdd">הוסף תשלום</button>
+      </div>
+    </div>
 
     <div class="row-end">
       <button type="button" class="btn-danger" id="editDeleteOrder" style="padding:10px 16px;font-size:14px;">מחק הזמנה</button>
@@ -689,10 +716,11 @@ async function loadList(){
       const reportInfo = b.report_received_at ? ' · 📋 יש דוח ממיכאל' : '';
       const broughtInfo = b.brought_by ? ' · הובא ע"י ' + esc(b.brought_by) : '';
       const directInfo = b.delivered_direct_note ? ' · 🤝 ' + esc(b.delivered_direct_note) : '';
+      const paidInfo = b.paid_total > 0 ? ' · 💰 שולם ₪' + Number(b.paid_total).toLocaleString('he-IL') : '';
       const supplierNoteInfo = b.supplier_note ? ' · <b style="color:var(--accent);">💬 מיכאל: ' + esc(b.supplier_note) + '</b>' : '';
       return '<div class="bag-row" data-order="' + b.order_number + '" data-code="' + b.bag_code + '" style="cursor:pointer;">' +
         '<div><div class="who">' + b.bag_code + ' · ' + esc(b.first_name) + ' ' + esc(b.last_name) + '</div>' +
-        '<div class="sub">הזמנה #' + b.order_number + ' · ' + item + ' · נוצר ' + when + collectionInfo + noteInfo + broughtInfo + directInfo + reportInfo + supplierNoteInfo + '</div></div>' +
+        '<div class="sub">הזמנה #' + b.order_number + ' · ' + item + ' · נוצר ' + when + collectionInfo + noteInfo + broughtInfo + directInfo + reportInfo + paidInfo + supplierNoteInfo + '</div></div>' +
         statusBadge(b) +
         '</div>';
     }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:20px;">אין שקיות תואמות</div>';
@@ -748,6 +776,7 @@ function renderEdit(data){
   const supplierNoEl = document.getElementById('editSupplierNo');
   supplierNoEl.textContent = data.supplier_customer_number ? 'מספר לקוח אצל מיכאל: ' + data.supplier_customer_number : '';
   supplierNoEl.classList.toggle('hidden', !data.supplier_customer_number);
+  renderPayments(data.payments || [], data.paid_total || 0);
   [...document.querySelectorAll('#editFirstName,#editLastName,#editPhone,#editAddress,#editBroughtBy')]
     .forEach(el => el.disabled = editLocked);
 
@@ -1358,7 +1387,7 @@ const LOG_ACTION_LABELS = {
   customer_notified: 'עודכן ללקוח', customer_collected: 'נאסף ע"י לקוח',
   customer_linked: 'מיכאל דיווח מספר לקוח', manual_fix: 'תיקון ידני', settings_changed: 'הגדרה עודכנה',
   report_received: '📋 התקבל דוח ממיכאל', print_failed: '⚠️ הדפסת מדבקה נכשלה', sms_failed: '⚠️ SMS ללקוח לא נשלח',
-  supplier_update: '✏️ מיכאל תיקן פרטים', supplier_note: '💬 הערה ממיכאל', bag_edited: '✏️ שונה בחנות', delivered_direct: '🤝 נמסר ללקוח ע"י מיכאל (לא דרך החנות)',
+  supplier_update: '✏️ מיכאל תיקן פרטים', supplier_note: '💬 הערה ממיכאל', bag_edited: '✏️ שונה בחנות', payment_added: '💰 התקבל תשלום', payment_deleted: '💰 תשלום נמחק', delivered_direct: '🤝 נמסר ללקוח ע"י מיכאל (לא דרך החנות)',
 };
 const LOG_ERROR_ACTIONS = new Set(['print_failed', 'sms_failed']);
 // בפעולות האלה הפירוט הטכני לא מעניין (הדוח עצמו בכפתור "דוח ממיכאל") — מציגים רק את שם הפעולה והזמן.
@@ -1565,6 +1594,41 @@ async function loadBagReports(code, box){
     box.innerHTML = '<div style="color:var(--danger);font-size:12px;">שגיאה: ' + esc(err.message) + '</div>';
   }
 }
+// --- תשלומים על הזמנה (בד"כ בשעת המסירה). לא תלוי בנעילת ההזמנה; כל הוספה/מחיקה נרשמת בהיסטוריה.
+const ils = (n) => '₪' + Number(n || 0).toLocaleString('he-IL', { maximumFractionDigits: 2 });
+function renderPayments(payments, total){
+  document.getElementById('editPaidTotal').textContent = payments.length ? 'שולם: ' + ils(total) : '';
+  document.getElementById('editPayments').innerHTML = payments.map(p =>
+    '<div class="pay-row"><span><b>' + ils(p.amount) + '</b>' + (p.method ? ' · ' + esc(p.method) : '') + (p.note ? ' · ' + esc(p.note) : '') +
+    ' <span style="color:var(--text-muted);font-size:11.5px;">(' + new Date(p.created_at).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }) + ')</span></span>' +
+    '<button type="button" class="payDel" data-id="' + p.id + '" title="מחק תשלום" style="background:none;border:1px solid var(--border);border-radius:7px;padding:2px 7px;cursor:pointer;color:var(--danger);">🗑</button></div>'
+  ).join('') || '<div style="color:var(--text-muted);font-size:12.5px;">עדיין לא נרשם תשלום</div>';
+  document.querySelectorAll('#editPayments .payDel').forEach(btn => btn.addEventListener('click', async () => {
+    if (!confirm('למחוק את התשלום הזה?')) return;
+    try {
+      const res = await fetch(API_BASE + '/api/orders/' + encodeURIComponent(editOrderNumber) + '/payments/' + encodeURIComponent(btn.dataset.id), { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'שגיאה');
+      openEdit(editOrderNumber);
+    } catch (err) { alert(err.message); }
+  }));
+}
+document.getElementById('payAdd').addEventListener('click', async () => {
+  const amount = document.getElementById('payAmount').value;
+  if (!(+amount > 0)) { alert('יש להזין סכום'); return; }
+  try {
+    const res = await fetch(API_BASE + '/api/orders/' + encodeURIComponent(editOrderNumber) + '/payments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: +amount, method: document.getElementById('payMethod').value, note: document.getElementById('payNote').value }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה');
+    document.getElementById('payAmount').value = '';
+    document.getElementById('payNote').value = '';
+    openEdit(editOrderNumber);
+  } catch (err) { alert(err.message); }
+});
 </script>
 </body>
 </html>

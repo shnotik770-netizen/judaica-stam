@@ -158,3 +158,14 @@ alter table bags add column if not exists mezuzah_cases int;
 -- כשהשקית חוזרת. מוצגת בחנות על השקית. ריקה = אין הערה.
 alter table bags add column if not exists supplier_note text;
 alter table bags add column if not exists supplier_note_at timestamptz;
+
+-- תשלומים שהתקבלו על הזמנה (בד"כ בשעת המסירה ללקוח). כמה תשלומים להזמנה אפשריים (למשל חלק במזומן וחלק באשראי).
+create table if not exists order_payments (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references orders(id) on delete cascade,
+  amount numeric(10,2) not null check (amount > 0),
+  method text,
+  note text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_order_payments_order on order_payments(order_id);

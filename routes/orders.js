@@ -285,6 +285,7 @@ router.get("/bags", asyncHandler(async (req, res) => {
             b.bag_code, b.item_type, b.item_type_note, b.quantity, b.variant, b.mezuzah_cases, b.supplier_note, b.status,
             b.picked_up_at, b.imported_at, b.ready_at, b.returned_at, b.delivered_direct_at, b.delivered_direct_note, b.customer_notified_at, b.customer_collected_at, b.created_at,
             (select max(r.received_at) from bag_reports r where r.bag_id = b.id) as report_received_at,
+            (select coalesce(sum(p.amount), 0)::float from order_payments p where p.order_id = o.id) as paid_total,
             col.collection_number, col.started_at as collection_started_at
      from bags b
      join orders o on o.id = b.order_id
@@ -560,7 +561,7 @@ router.get("/activity-log", asyncHandler(async (req, res) => {
       // כולל אירועים ברמת ההזמנה של השקית (נוצרה / נערכו פרטי לקוח) — הם נרשמים בלי bag_code
       `select id, bag_code, order_number, action, detail, created_at from activity_log
        where action <> 'log_entry_deleted'
-         and (bag_code = $1 or (bag_code is null and action in ('order_created', 'order_edited') and order_number =
+         and (bag_code = $1 or (bag_code is null and action in ('order_created', 'order_edited', 'payment_added', 'payment_deleted') and order_number =
               (select o.order_number from bags b join orders o on o.id = b.order_id where b.bag_code = $1)))
        order by created_at desc limit $2`,
       [bagCode, limit]
@@ -662,7 +663,11 @@ router.get("/:order_number", asyncHandler(async (req, res) => {
   );
   const { id, ...order } = o.rows[0];
   const locked = bags.rows.some((b) => b.imported_at != null || b.status === "returned" || b.status === "delivered_direct");
-  res.json({ ...order, locked, bags: bags.rows });
+  const { rows: payments } = await pool.query(
+    "select id, amount::float as amount, method, note, created_at from order_payments where order_id = $1 order by created_at",
+    [id]
+  );
+  res.json({ ...order, locked, bags: bags.rows, payments, paid_total: payments.reduce((sum, p) => sum + p.amount, 0) });
 }));
 
 // עריכת פרטי לקוח ופרטי שקיות קיימות בהזמנה (סוג/הערה/כמות, לא מספר שקית/ברקוד) —
@@ -752,6 +757,49 @@ router.put("/:order_number", asyncHandler(async (req, res) => {
   if (orderChanges.length) logActivity(null, req.params.order_number, "order_edited", orderChanges.join(" · "));
   for (const bc of bagChanges) logActivity(bc.bag_code, req.params.order_number, "bag_edited", bc.changes.join(" · "));
   res.json({ ok: true, order_changes: orderChanges, bag_changes: bagChanges });
+}));
+
+// תשלום שהתקבל על הזמנה (בד"כ בשעת המסירה) — {amount, method?, note?}. לא תלוי בנעילת ההזמנה. נרשם ביומן ההזמנה.
+const PAYMENT_METHODS = ["מזומן", "אשראי", "העברה בנקאית", "ביט", "פייבוקס", "צ'ק", "אחר"];
+router.post("/:order_number/payments", asyncHandler(async (req, res) => {
+  const amount = Math.round(Number(req.body?.amount) * 100) / 100;
+  if (!Number.isFinite(amount) || amount <= 0) {
+    res.status(400).json({ error: "סכום חייב להיות מספר גדול מ-0" });
+    return;
+  }
+  const method = req.body?.method ? String(req.body.method) : null;
+  if (method && !PAYMENT_METHODS.includes(method)) {
+    res.status(400).json({ error: `אמצעי תשלום לא מוכר: ${method}` });
+    return;
+  }
+  const note = String(req.body?.note || "").trim().slice(0, 300) || null;
+  const o = await pool.query("select id from orders where order_number = $1", [req.params.order_number]);
+  if (o.rows.length === 0) {
+    res.status(404).json({ error: "הזמנה לא נמצאה" });
+    return;
+  }
+  const { rows } = await pool.query(
+    "insert into order_payments (order_id, amount, method, note) values ($1,$2,$3,$4) returning id",
+    [o.rows[0].id, amount, method, note]
+  );
+  logActivity(null, req.params.order_number, "payment_added",
+    `₪${amount}` + (method ? ` · ${method}` : "") + (note ? ` · ${note}` : ""));
+  res.status(201).json({ ok: true, id: rows[0].id });
+}));
+
+router.delete("/:order_number/payments/:id", asyncHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    `delete from order_payments p using orders o
+     where p.id = $1 and p.order_id = o.id and o.order_number = $2
+     returning p.amount::float as amount, p.method`,
+    [req.params.id, req.params.order_number]
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ error: "התשלום לא נמצא" });
+    return;
+  }
+  logActivity(null, req.params.order_number, "payment_deleted", `₪${rows[0].amount}` + (rows[0].method ? ` · ${rows[0].method}` : ""));
+  res.json({ ok: true });
 }));
 
 // הוספת שקית חדשה להזמנה קיימת (ומדפיסה לה מדבקה מיד, כמו ביצירת הזמנה) — רק כל עוד ההזמנה לא נעולה.
