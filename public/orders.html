@@ -483,7 +483,8 @@ function addBag(){
   // ברירת מחדל רק הנפוצים (תפילין זוג, מזוזה); "מוצרים נוספים" פותח את הרשימה המלאה
   const fillTypes = (full) => {
     const current = typeSel.value;
-    typeSel.innerHTML = Object.entries(ITEM_LABELS)
+    // בלי ברירת מחדל — "בחר סוג פריט…" עד שבוחרים בפועל (נבדק בשליחה)
+    typeSel.innerHTML = '<option value="" disabled selected>בחר סוג פריט…</option>' + Object.entries(ITEM_LABELS)
       .filter(([v]) => full || COMMON_ITEM_TYPES.includes(v))
       .map(([v, label]) => '<option value="' + v + '">' + label + '</option>').join('');
     if (current) typeSel.value = current;
@@ -569,6 +570,13 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
     mezuzah_cases: readCases(b),
   }));
   if (bags.length === 0) { msg.className = 'msg err'; msg.textContent = 'צריך לפחות שקית אחת.'; return; }
+  const noType = bags.findIndex(b => !b.item_type);
+  if (noType >= 0) {
+    msg.className = 'msg err';
+    msg.textContent = 'שקית ' + (noType + 1) + ': יש לבחור סוג פריט.';
+    bagsEl.querySelectorAll('.bag')[noType].querySelector('.itemType').focus();
+    return;
+  }
   const tooManyCases = bags.findIndex(b => b.mezuzah_cases != null && (b.mezuzah_cases < 0 || b.mezuzah_cases > b.quantity));
   if (tooManyCases >= 0) {
     msg.className = 'msg err';
