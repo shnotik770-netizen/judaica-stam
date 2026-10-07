@@ -299,6 +299,7 @@
     <div class="msg" id="editLockedMsg" style="display:none;background:#fbf0e3;color:#8a5a1f;">
       ההזמנה הזו כבר נכנסה למערכת הספק — לא ניתן לערוך או למחוק אותה יותר, רק לצפות.
     </div>
+    <div class="suggest hidden" id="editSupplierNo" style="margin-top:0;"></div>
     <div class="grid2">
       <div class="field"><label>שם פרטי</label><input id="editFirstName"></div>
       <div class="field"><label>שם משפחה</label><input id="editLastName"></div>
@@ -708,6 +709,10 @@ function renderEdit(data){
   document.getElementById('editPhone').value = data.phone;
   document.getElementById('editAddress').value = data.address;
   document.getElementById('editBroughtBy').value = data.brought_by || '';
+  // מספר הלקוח אצל מיכאל (customer-link מהתוכנה שלו) — לקריאה בלבד
+  const supplierNoEl = document.getElementById('editSupplierNo');
+  supplierNoEl.textContent = data.supplier_customer_number ? 'מספר לקוח אצל מיכאל: ' + data.supplier_customer_number : '';
+  supplierNoEl.classList.toggle('hidden', !data.supplier_customer_number);
   [...document.querySelectorAll('#editFirstName,#editLastName,#editPhone,#editAddress,#editBroughtBy')]
     .forEach(el => el.disabled = editLocked);
 

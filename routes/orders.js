@@ -611,7 +611,7 @@ router.get("/", asyncHandler(async (req, res) => {
 // (imported_at) או כבר חזרה (returned) — לא ניתן יותר לערוך/למחוק את ההזמנה או שקיות שלה.
 router.get("/:order_number", asyncHandler(async (req, res) => {
   const o = await pool.query(
-    `select o.id, o.order_number, o.status, o.brought_by, c.first_name, c.last_name, c.phone, c.address
+    `select o.id, o.order_number, o.status, o.brought_by, c.first_name, c.last_name, c.phone, c.address, c.supplier_customer_number
      from orders o join customers c on c.id = o.customer_id
      where o.order_number = $1`,
     [req.params.order_number]
