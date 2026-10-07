@@ -2,6 +2,8 @@ import express from "express";
 import { pool } from "../lib/db.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import { logActivity, snapshotBagStates } from "../lib/activityLog.js";
+import { ITEM_TYPES, ITEM_TYPE_LABELS } from "../lib/itemTypes.js";
+import { VARIANT_FIELDS, cleanVariant } from "../lib/variant.js";
 
 export const router = express.Router();
 // ללא אימות בכוונה — החלטת המשתמש: מיכאל אמור להיות מחובר תמיד בלי להזין מפתח כדי לעבוד.
@@ -136,7 +138,8 @@ async function returnBag(bag, result) {
     `update bags set status='returned', returned_at=now(), result=$2, updated_at=now() where id=$1`,
     [bag.id, result ? JSON.stringify(result) : null]
   );
-  logActivity(bag.bag_code, bag.order_number, "returned", result ? JSON.stringify(result) : null, prev);
+  // בלי פירוט ביומן — הדוח עצמו נשמר ב-result ומוצג בכפתור "דוח ממיכאל"
+  logActivity(bag.bag_code, bag.order_number, "returned", null, prev);
 }
 
 // עדכון סטטוס — מזהה לבד אם זו מסירה (איסוף) או החזרה, לפי מצב השקית הנוכחי. לסריקה בודדת
@@ -296,6 +299,112 @@ router.get("/report/:code", asyncHandler(async (req, res) => {
   res.json({ bag_code: bag.bag_code, reports: rows });
 }));
 
+// תיקון פרטים מהספק — כשמיכאל מגלה שמשהו נרשם לא נכון בקבלה (כמות, סוג, פרטי פריט, או שם/טלפון/כתובת של הלקוח).
+// גוף: {bag_code, item_type?, quantity?, item_type_note?, variant?, customer?: {first_name?, last_name?, phone?, address?}}
+// או כמה בבת אחת {updates: [...]}. רק השדות שנשלחו נבדקים; ביומן נרשם רק מה שבאמת השתנה ("כמות: מ-6 ל-7").
+// variant מתמזג עם הקיים (ערך null/"" מוחק שדה), ואחר כך מנוקה לפי סוג הפריט. עוקף את נעילת ההזמנה במתכוון —
+// הספק מתקן לפי מה שיש אצלו פיזית. הלקוח שמתעדכן הוא הלקוח של ההזמנה של השקית (משפיע על כל ההזמנות שלו).
+const CUSTOMER_FIELD_LABELS = { first_name: "שם פרטי", last_name: "שם משפחה", phone: "טלפון", address: "כתובת" };
+const shown = (v) => (v == null || v === "" ? "לא צוין" : String(v));
+const variantValueLabel = (key, v) => (v == null ? "לא צוין" : VARIANT_FIELDS[key]?.options[v] || v);
+
+async function applySupplierUpdate(item) {
+  const { bag_code, customer } = item || {};
+  if (!bag_code) return { bag_code: null, ok: false, error: "bag_code נדרש" };
+  const bag = await loadBag(String(bag_code));
+  if (!bag) return { bag_code, ok: false, error: "קוד לא מוכר" };
+
+  const bagSets = {};
+  const changes = [];
+  // סוג פריט
+  let itemType = bag.item_type;
+  if (item.item_type !== undefined && item.item_type !== bag.item_type) {
+    if (!ITEM_TYPES.includes(item.item_type)) return { bag_code, ok: false, error: `item_type לא תקין: ${item.item_type}` };
+    itemType = item.item_type;
+    bagSets.item_type = itemType;
+    changes.push(`סוג פריט: מ-${ITEM_TYPE_LABELS[bag.item_type]} ל-${ITEM_TYPE_LABELS[itemType]}`);
+  }
+  // כמות
+  if (item.quantity !== undefined) {
+    const q = Number(item.quantity);
+    if (!Number.isInteger(q) || q < 1) return { bag_code, ok: false, error: "quantity חייב להיות מספר שלם חיובי" };
+    if (q !== bag.quantity) { bagSets.quantity = q; changes.push(`כמות: מ-${bag.quantity} ל-${q}`); }
+  }
+  // הערה
+  if (item.item_type_note !== undefined) {
+    const note = String(item.item_type_note ?? "").trim() || null;
+    if (note !== (bag.item_type_note || null)) { bagSets.item_type_note = note; changes.push(`הערה: מ-${shown(bag.item_type_note)} ל-${shown(note)}`); }
+  }
+  // פרטי פריט (variant) — מיזוג עם הקיים, ניקוי לפי סוג הפריט (גם אם רק סוג הפריט השתנה)
+  if (item.variant !== undefined || bagSets.item_type) {
+    const merged = { ...(bag.variant || {}), ...(item.variant && typeof item.variant === "object" ? item.variant : {}) };
+    const cleaned = cleanVariant(itemType, merged);
+    if (cleaned.error) return { bag_code, ok: false, error: cleaned.error };
+    const before = bag.variant || {};
+    const after = cleaned.variant || {};
+    for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+      if (before[key] !== after[key]) {
+        changes.push(`${VARIANT_FIELDS[key]?.label || key}: מ-${variantValueLabel(key, before[key])} ל-${variantValueLabel(key, after[key])}`);
+      }
+    }
+    if (JSON.stringify(before) !== JSON.stringify(after)) bagSets.variant = cleaned.variant ? JSON.stringify(cleaned.variant) : null;
+  }
+  // פרטי לקוח
+  const customerSets = {};
+  if (customer && typeof customer === "object") {
+    for (const key of Object.keys(CUSTOMER_FIELD_LABELS)) {
+      if (customer[key] === undefined) continue;
+      const value = String(customer[key] ?? "").trim();
+      if (!value && key !== "address") return { bag_code, ok: false, error: `${key} לא יכול להיות ריק` };
+      if (value !== (bag[key] || "")) {
+        customerSets[key] = value;
+        changes.push(`${CUSTOMER_FIELD_LABELS[key]}: מ-${shown(bag[key])} ל-${shown(value)}`);
+      }
+    }
+  }
+
+  if (changes.length === 0) return { bag_code: bag.bag_code, ok: true, changes: [] };
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const bagKeys = Object.keys(bagSets);
+    if (bagKeys.length) {
+      await client.query(
+        `update bags set ${bagKeys.map((k, i) => `${k} = $${i + 2}`).join(", ")}, updated_at = now() where id = $1`,
+        [bag.id, ...bagKeys.map((k) => bagSets[k])]
+      );
+    }
+    const custKeys = Object.keys(customerSets);
+    if (custKeys.length) {
+      await client.query(
+        `update customers set ${custKeys.map((k, i) => `${k} = $${i + 2}`).join(", ")}
+         where id = (select customer_id from orders where order_number = $1)`,
+        [bag.order_number, ...custKeys.map((k) => customerSets[k])]
+      );
+    }
+    await client.query("commit");
+  } catch (e) {
+    await client.query("rollback");
+    throw e;
+  } finally {
+    client.release();
+  }
+  logActivity(bag.bag_code, bag.order_number, "supplier_update", changes.join(" · "));
+  return { bag_code: bag.bag_code, ok: true, changes };
+}
+
+router.post("/update", asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const items = Array.isArray(body.updates) ? body.updates : [body];
+  if (items.length === 0 || items.length > 200) {
+    res.status(400).json({ error: "צריך עדכון אחד לפחות (ועד 200 בבקשה אחת)" });
+    return;
+  }
+  const results = [];
+  for (const item of items) results.push(await applySupplierUpdate(item));
+  res.json({ results });
+}));
+
 // מספר הלקוח אצל הספק. עדיף לפי שקית — {bag_code, customer_number}: מעדכן רק את הלקוח של ההזמנה של אותה שקית,
 // בלי תלות בטלפון (ובלי לפגוע בלקוחות אחרים עם אותו טלפון, למשל מי ש"הביא" פריטים). אפשרות ישנה לפי טלפון —
 // {phone, customer_number}: משווה לפי ספרות בלבד (050-1234567 = 0501234567) ומעדכן את כל הלקוחות עם אותו טלפון.
@@ -319,7 +428,7 @@ router.post("/customer-link", asyncHandler(async (req, res) => {
       return;
     }
     const bag = await loadBag(String(bag_code));
-    logActivity(bag.bag_code, bag.order_number, "customer_linked", `customer_number=${number}`);
+    logActivity(bag.bag_code, bag.order_number, "customer_linked", `מספר לקוח אצל מיכאל: ${number}`);
     res.json({ ok: true, updated: rows.length });
     return;
   }
@@ -332,6 +441,6 @@ router.post("/customer-link", asyncHandler(async (req, res) => {
     res.status(404).json({ error: "לא נמצא לקוח עם הטלפון הזה אצלנו" });
     return;
   }
-  logActivity(null, null, "customer_linked", `phone=${phone} customer_number=${number}`);
+  logActivity(null, null, "customer_linked", `טלפון ${phone} · מספר לקוח אצל מיכאל: ${number}`);
   res.json({ ok: true, updated: rows.length });
 }));

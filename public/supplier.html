@@ -646,6 +646,7 @@ const SUPPLIER_LOG_LABELS = {
   order_created: 'הזמנה נוצרה', bag_added: 'שקית נוספה', label_reprinted: 'מדבקה הודפסה שוב',
   report_received: '📋 נשלח דוח', released: 'מוכן — שוחרר מהתוכנה', picked_up: 'נאסף ע"י מיכאל', returned: 'הוחזר ממיכאל', customer_notified: 'עודכן ללקוח',
   customer_collected: 'נאסף ע"י לקוח', manual_fix: 'תיקון ידני (חנות)', print_failed: 'הדפסת מדבקה נכשלה',
+  supplier_update: '✏️ תיקון פרטים', customer_linked: 'דווח מספר לקוח', order_edited: 'ההזמנה נערכה בחנות',
 };
 const SUPPLIER_EDITABLE_ACTIONS = new Set(['picked_up', 'released', 'returned']);
 function logWhenHtml(entry){
@@ -666,7 +667,9 @@ async function loadSupplierHistory(code, box){
         ? '<button type="button" class="histDel" data-id="' + entry.id + '" data-label="' + esc(label) + '" title="מחק שורה — השקית תחזור למצב הקודם" ' +
           'style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:7px;padding:3px 7px;cursor:pointer;color:var(--danger);font-size:12px;">🗑</button>' : '';
       return '<div style="font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
-        '<div><b>' + esc(label) + '</b> · ' + logWhenHtml(entry) + '</div>' + del + '</div>';
+        '<div><b>' + esc(label) + '</b> · ' + logWhenHtml(entry) +
+        // בתיקון פרטים מציגים מה השתנה; בשאר הפעולות — רק השם והזמן
+        (entry.action === 'supplier_update' && entry.detail ? ' · ' + esc(entry.detail) : '') + '</div>' + del + '</div>';
     }).join('') || '<div style="color:var(--text-muted);font-size:12px;">אין היסטוריה לשקית ' + esc(code) + '</div>';
     box.querySelectorAll('.histDel').forEach(b => b.addEventListener('click', () => deleteSupplierHistoryRow(code, box, b.dataset)));
   } catch (err) {

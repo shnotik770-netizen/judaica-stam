@@ -7,31 +7,11 @@ import { sendSms } from "../lib/call2all.js";
 import { logActivity, snapshotBagStates, BAG_STATE_FIELDS } from "../lib/activityLog.js";
 import { getSetting, setSetting } from "../lib/settings.js";
 import { cleanVariant, variantText } from "../lib/variant.js";
+import { ITEM_TYPES, ITEM_TYPE_LABELS } from "../lib/itemTypes.js";
 
 export const router = express.Router();
 // ללא אימות בכוונה — החלטת החנות: מי שיש לו גישה לאתר יכול ליצור הזמנות, בלי קוד API.
 
-const ITEM_TYPES = [
-  "tefillin_pair",
-  "tefillin_head",
-  "tefillin_hand",
-  "mezuzah",
-  "megillah",
-  "sefer_torah",
-  "nach",
-  "other",
-];
-
-const ITEM_TYPE_LABELS = {
-  tefillin_pair: "תפילין זוג",
-  tefillin_head: "תפילין ראש",
-  tefillin_hand: "תפילין יד",
-  mezuzah: "מזוזה",
-  megillah: "מגילה",
-  sefer_torah: "ספר תורה",
-  nach: "נ\"ך",
-  other: "אחר",
-};
 
 const ITEM_TYPE_PLURALS = {
   tefillin_pair: "זוגות תפילין",

@@ -799,7 +799,7 @@ async function loadBagHistory(code){
       const label = LOG_ACTION_LABELS[entry.action] || entry.action;
       const color = LOG_ERROR_ACTIONS.has(entry.action) ? 'var(--danger)' : 'inherit';
       return '<div style="font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
-        '<div><b style="color:' + color + ';">' + esc(label) + '</b> · ' + logWhenHtml(entry) + (entry.detail ? ' · ' + esc(entry.detail) : '') + '</div>' +
+        '<div><b style="color:' + color + ';">' + esc(label) + '</b> · ' + logWhenHtml(entry) + logDetailText(entry) + '</div>' +
         '<button type="button" class="historyDel" data-id="' + entry.id + '" data-action="' + esc(entry.action) + '" data-label="' + esc(label) + '" title="מחק שורה" ' +
         'style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:7px;padding:3px 7px;cursor:pointer;color:var(--danger);font-size:12px;">🗑</button>' +
         '</div>';
@@ -1318,10 +1318,17 @@ const LOG_ACTION_LABELS = {
   bag_added: 'שקית נוספה', bag_deleted: 'שקית נמחקה', label_reprinted: 'מדבקה הודפסה שוב',
   picked_up: 'נאסף ע"י מיכאל', released: 'מוכן אצל מיכאל (שוחרר מהתוכנה)', returned: 'הוחזר ממיכאל',
   customer_notified: 'עודכן ללקוח', customer_collected: 'נאסף ע"י לקוח',
-  customer_linked: 'דווח מספר לקוח', manual_fix: 'תיקון ידני', settings_changed: 'הגדרה עודכנה',
+  customer_linked: 'מיכאל דיווח מספר לקוח', manual_fix: 'תיקון ידני', settings_changed: 'הגדרה עודכנה',
   report_received: '📋 התקבל דוח ממיכאל', print_failed: '⚠️ הדפסת מדבקה נכשלה', sms_failed: '⚠️ SMS ללקוח לא נשלח',
+  supplier_update: '✏️ מיכאל תיקן פרטים',
 };
 const LOG_ERROR_ACTIONS = new Set(['print_failed', 'sms_failed']);
+// בפעולות האלה הפירוט הטכני לא מעניין (הדוח עצמו בכפתור "דוח ממיכאל") — מציגים רק את שם הפעולה והזמן.
+// בתיקון פרטים (supplier_update) הפירוט הוא בדיוק מה שהשתנה, ולכן הוא כן מוצג.
+const LOG_HIDE_DETAIL = new Set(['picked_up', 'released', 'returned', 'report_received']);
+function logDetailText(entry){
+  return entry.detail && !LOG_HIDE_DETAIL.has(entry.action) ? ' · ' + esc(entry.detail) : '';
+}
 LOG_ACTION_LABELS.log_entry_deleted = '🗑 שורה נמחקה מההיסטוריה';
 // תאריך עברי קודם, ואחריו בקטן ובסוגריים תאריך לועזי ושעה
 function logWhenHtml(entry){
@@ -1345,7 +1352,7 @@ async function loadActivityLog(){
       const color = LOG_ERROR_ACTIONS.has(entry.action) ? 'var(--danger)' : 'inherit';
       const ref = [entry.bag_code, entry.order_number ? 'הזמנה #' + entry.order_number : null].filter(Boolean).join(' · ');
       return '<div class="bag-row" style="cursor:default;"><div><div class="who" style="color:' + color + ';">' + esc(label) + (ref ? ' — ' + esc(ref) : '') + '</div>' +
-        '<div class="sub">' + logWhenHtml(entry) + (entry.detail ? ' · ' + esc(entry.detail) : '') + '</div></div></div>';
+        '<div class="sub">' + logWhenHtml(entry) + logDetailText(entry) + '</div></div></div>';
     }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:20px;">אין פעולות עדיין</div>';
   } catch (err) {
     listEl.innerHTML = '<div style="color:var(--danger);padding:10px;">שגיאה: ' + esc(err.message) + '</div>';
