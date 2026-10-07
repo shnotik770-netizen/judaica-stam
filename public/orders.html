@@ -223,6 +223,11 @@
     <div id="bags"></div>
     <button type="button" class="btn-add" id="addBag">+ הוסף שקית</button>
 
+    <div class="grid2">
+      <div class="field"><label>💰 תשלום שהתקבל עכשיו (₪)</label><input id="newPayAmount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="לא חובה"></div>
+      <div class="field"><label>הערה לתשלום</label><input id="newPayNote" placeholder="לא חובה"></div>
+    </div>
+
     <div class="row-end">
       <button type="submit" class="btn-primary">צור הזמנה והדפס מדבקות</button>
     </div>
@@ -598,6 +603,9 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
       address: document.getElementById('address').value.trim(),
     },
     brought_by: document.getElementById('broughtBy').value.trim(),
+    payment: document.getElementById('newPayAmount').value
+      ? { amount: +document.getElementById('newPayAmount').value, note: document.getElementById('newPayNote').value.trim() }
+      : null,
     bags,
   };
 

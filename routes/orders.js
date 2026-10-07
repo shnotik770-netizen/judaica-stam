@@ -130,6 +130,17 @@ router.post("/", asyncHandler(async (req, res) => {
     b.mezuzah_cases = cases.value;
   }
 
+  // תשלום שהתקבל כבר בשעת הזנת ההזמנה (לא חובה) — נשמר יחד עם ההזמנה, באותה טרנזקציה
+  let initialPayment = null;
+  if (req.body.payment && req.body.payment.amount !== undefined && req.body.payment.amount !== "" && req.body.payment.amount !== null) {
+    const amount = Math.round(Number(req.body.payment.amount) * 100) / 100;
+    if (!Number.isFinite(amount) || amount <= 0) {
+      res.status(400).json({ error: "סכום התשלום חייב להיות מספר גדול מ-0" });
+      return;
+    }
+    initialPayment = { amount, note: String(req.body.payment.note || "").trim().slice(0, 300) || null };
+  }
+
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -175,6 +186,12 @@ router.post("/", asyncHandler(async (req, res) => {
       );
       createdBags.push(r.rows[0]);
     }
+    if (initialPayment) {
+      await client.query(
+        "insert into order_payments (order_id, amount, note) values ($1,$2,$3)",
+        [orderId, initialPayment.amount, initialPayment.note]
+      );
+    }
 
     await client.query("commit");
 
@@ -182,6 +199,9 @@ router.post("/", asyncHandler(async (req, res) => {
     for (const b of createdBags) printBagLabel(order_number, customer, b);
 
     logActivity(null, order_number, "order_created", `${createdBags.length} שקיות` + (broughtBy ? ` · הובא ע"י ${broughtBy}` : ""));
+    if (initialPayment) {
+      logActivity(null, order_number, "payment_added", `₪${initialPayment.amount}` + (initialPayment.note ? ` · ${initialPayment.note}` : "") + " · בשעת ההזמנה");
+    }
     res.status(201).json({ order_number, bags: createdBags });
   } catch (e) {
     await client.query("rollback");
