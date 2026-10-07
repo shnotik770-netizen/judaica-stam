@@ -169,6 +169,7 @@
   .variant-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
   .variant-row:empty{display:none;}
   .badge.ready{background:#f3e8fd;color:#6a3fb5;}
+  button.more-types{background:none;border:none;color:var(--accent);font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer;padding:4px 0 0;}
 </style>
 </head>
 <body>
@@ -246,6 +247,7 @@
         <option value="returned_at_store">הגיע לחנות</option>
         <option value="notified">לקוח קיבל הודעה</option>
         <option value="collected">נאסף ע"י לקוח</option>
+        <option value="delivered_direct">נמסר ללקוח ע"י מיכאל</option>
       </select>
       <input id="filterCollection" type="number" placeholder="מספר איסוף">
     </div>
@@ -337,6 +339,7 @@
             <option value="waiting_pickup">הוזמן (ממתין לאיסוף)</option>
             <option value="with_supplier">אצל הספק</option>
             <option value="returned">חזר</option>
+            <option value="delivered_direct">נמסר ללקוח ע"י מיכאל</option>
           </select>
         </div>
       </div>
@@ -388,16 +391,8 @@
     <div class="bag-head"><b></b><button type="button" class="btn-danger remove">הסר</button></div>
     <div class="bag-grid">
       <div class="field"><label>סוג פריט</label>
-        <select class="itemType">
-          <option value="tefillin_pair">תפילין זוג</option>
-          <option value="tefillin_head">תפילין ראש</option>
-          <option value="tefillin_hand">תפילין יד</option>
-          <option value="mezuzah">מזוזה</option>
-          <option value="megillah">מגילה</option>
-          <option value="sefer_torah">ספר תורה</option>
-          <option value="nach">נ"ך</option>
-          <option value="other">אחר</option>
-        </select>
+        <select class="itemType"></select>
+        <button type="button" class="more-types">＋ מוצרים נוספים</button>
       </div>
       <div class="field"><label>כמות</label><input type="number" class="qty" value="1" min="1"></div>
       <div class="field"><label>הערות</label><input class="note" placeholder="הערה לשקית (לא חובה)"></div>
@@ -439,6 +434,11 @@ function variantText(variant){
   if (!variant) return '';
   return Object.entries(variant).map(([k, v]) => (VARIANT_FIELDS[k] && VARIANT_FIELDS[k].options[v]) || v).join(' · ');
 }
+const ITEM_LABELS = {
+  tefillin_pair:'תפילין זוג', tefillin_head:'תפילין ראש', tefillin_hand:'תפילין יד',
+  mezuzah:'מזוזה', megillah:'מגילה', sefer_torah:'ספר תורה', nach:'נ"ך', other:'אחר',
+};
+const COMMON_ITEM_TYPES = ['tefillin_pair', 'mezuzah'];
 const bagsEl = document.getElementById('bags');
 const tpl = document.getElementById('bagTpl');
 let bagCount = 0;
@@ -451,6 +451,22 @@ function addBag(){
     e.target.closest('.bag').remove();
   });
   const typeSel = node.querySelector('.itemType');
+  // ברירת מחדל רק הנפוצים (תפילין זוג, מזוזה); "מוצרים נוספים" פותח את הרשימה המלאה
+  const fillTypes = (full) => {
+    const current = typeSel.value;
+    typeSel.innerHTML = Object.entries(ITEM_LABELS)
+      .filter(([v]) => full || COMMON_ITEM_TYPES.includes(v))
+      .map(([v, label]) => '<option value="' + v + '">' + label + '</option>').join('');
+    if (current) typeSel.value = current;
+  };
+  fillTypes(false);
+  const moreBtn = node.querySelector('.more-types');
+  moreBtn.addEventListener('click', () => {
+    fillTypes(true);
+    moreBtn.remove();
+    typeSel.focus();
+    try { typeSel.showPicker && typeSel.showPicker(); } catch (e) {}
+  });
   const variantRow = node.querySelector('.variant-row');
   const renderVariant = () => { variantRow.innerHTML = variantFieldsHtml(typeSel.value, null, false); };
   typeSel.addEventListener('change', renderVariant);
@@ -576,10 +592,6 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   if (tab === 'admin') showAdminSection(currentAdminSection);
 }));
 
-const ITEM_LABELS = {
-  tefillin_pair:'תפילין זוג', tefillin_head:'תפילין ראש', tefillin_hand:'תפילין יד',
-  mezuzah:'מזוזה', megillah:'מגילה', sefer_torah:'ספר תורה', nach:'נ"ך', other:'אחר',
-};
 const STATUS_BADGE = {
   waiting_pickup: '<span class="badge waiting">הוזמן</span>',
   with_supplier: '<span class="badge progress">נאסף</span>',
@@ -587,6 +599,7 @@ const STATUS_BADGE = {
 };
 function statusBadge(b){
   // אצל הספק: "נאסף" עד שהתוכנה של מיכאל מושכת אותה (imported_at, דרך GET /api/supplier/with-me)
+  if (b.status === 'delivered_direct') return '<span class="badge collected">נמסר ללקוח ע"י מיכאל</span>';
   // התוכנה של מיכאל שלחה דוח ושחררה — מוכן אצלו, עוד לא נמסר לחנות
   if (b.status === 'with_supplier' && b.ready_at) return '<span class="badge ready">מוכן אצל מיכאל</span>';
   if (b.status === 'with_supplier' && b.imported_at) return '<span class="badge progress">בתוכנה של מיכאל</span>';
@@ -655,9 +668,10 @@ async function loadList(){
       const noteInfo = b.item_type_note ? ' · 📝 ' + esc(b.item_type_note) : '';
       const reportInfo = b.report_received_at ? ' · 📋 יש דוח ממיכאל' : '';
       const broughtInfo = b.brought_by ? ' · הובא ע"י ' + esc(b.brought_by) : '';
+      const directInfo = b.delivered_direct_note ? ' · 🤝 ' + esc(b.delivered_direct_note) : '';
       return '<div class="bag-row" data-order="' + b.order_number + '" data-code="' + b.bag_code + '" style="cursor:pointer;">' +
         '<div><div class="who">' + b.bag_code + ' · ' + esc(b.first_name) + ' ' + esc(b.last_name) + '</div>' +
-        '<div class="sub">הזמנה #' + b.order_number + ' · ' + item + ' · נוצר ' + when + collectionInfo + noteInfo + broughtInfo + reportInfo + '</div></div>' +
+        '<div class="sub">הזמנה #' + b.order_number + ' · ' + item + ' · נוצר ' + when + collectionInfo + noteInfo + broughtInfo + directInfo + reportInfo + '</div></div>' +
         statusBadge(b) +
         '</div>';
     }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:20px;">אין שקיות תואמות</div>';
@@ -787,7 +801,7 @@ function renderEdit(data){
 
 // היסטוריית שקית במסך העריכה. כל שורה ניתנת למחיקה — שורה של פעולה שמשנה מצב (איסוף/החזרה/עדכון/
 // איסוף לקוח/תיקון ידני) מחזירה את השקית למצב שלפניה (ראו DELETE /api/orders/activity-log/:id).
-const STATE_LOG_ACTIONS = new Set(['picked_up', 'released', 'returned', 'customer_notified', 'customer_collected', 'manual_fix']);
+const STATE_LOG_ACTIONS = new Set(['picked_up', 'released', 'returned', 'delivered_direct', 'customer_notified', 'customer_collected', 'manual_fix']);
 async function loadBagHistory(code){
   const container = document.getElementById('history-' + code);
   container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">טוען…</div>';
@@ -1320,7 +1334,7 @@ const LOG_ACTION_LABELS = {
   customer_notified: 'עודכן ללקוח', customer_collected: 'נאסף ע"י לקוח',
   customer_linked: 'מיכאל דיווח מספר לקוח', manual_fix: 'תיקון ידני', settings_changed: 'הגדרה עודכנה',
   report_received: '📋 התקבל דוח ממיכאל', print_failed: '⚠️ הדפסת מדבקה נכשלה', sms_failed: '⚠️ SMS ללקוח לא נשלח',
-  supplier_update: '✏️ מיכאל תיקן פרטים',
+  supplier_update: '✏️ מיכאל תיקן פרטים', delivered_direct: '🤝 נמסר ללקוח ע"י מיכאל (לא דרך החנות)',
 };
 const LOG_ERROR_ACTIONS = new Set(['print_failed', 'sms_failed']);
 // בפעולות האלה הפירוט הטכני לא מעניין (הדוח עצמו בכפתור "דוח ממיכאל") — מציגים רק את שם הפעולה והזמן.

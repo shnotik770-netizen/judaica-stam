@@ -361,7 +361,7 @@ function matchesSearch(b, q){
     (b.customer.address || '') + ' ' + b.bag_code + ' ' + b.order_number).toLowerCase();
   return hay.includes(q);
 }
-const STAGE_LABELS = { collected: 'אספתי', imported: 'נכנס לתוכנה', ready: 'מוכן — שוחרר מהתוכנה', returning: 'במסירה לחנות' };
+const STAGE_LABELS = { delivered_direct: 'נמסר ללקוח ישירות', collected: 'אספתי', imported: 'נכנס לתוכנה', ready: 'מוכן — שוחרר מהתוכנה', returning: 'במסירה לחנות' };
 // פרטי הפריט (variant) בקודים המוסכמים — תצוגה בלבד, כמו ב-/orders.html ו-lib/variant.js
 const VARIANT_LABELS = {
   method: { rashi: 'רש"י', rt: 'ר"ת' },
@@ -372,7 +372,24 @@ function variantText(variant){
   if (!variant) return '';
   return Object.entries(variant).map(([k, v]) => (VARIANT_LABELS[k] && VARIANT_LABELS[k][v]) || v).join(' · ');
 }
-function renderRows(bags, extraLine, clickable, withHistory){
+// פירוט השקיות הממתינות לפי סוג — כמה שקיות תפילין (כל הסוגים יחד), כמה שקיות מזוזות ובסוגריים כמה מזוזות
+// בפועל (סכום הכמויות), ושאר הסוגים לפי שם. למשל: " — 2 תפילין · 3 מזוזות (7 מזוזות בפועל) · 1 מגילה"
+function pendingBreakdown(bags){
+  if (!bags.length) return '';
+  const tefillin = bags.filter(b => b.item_type.startsWith('tefillin_')).length;
+  const mezuzahBags = bags.filter(b => b.item_type === 'mezuzah');
+  const mezuzahCount = mezuzahBags.reduce((sum, b) => sum + (b.quantity || 1), 0);
+  const parts = [];
+  if (tefillin) parts.push(tefillin + ' תפילין');
+  if (mezuzahBags.length) parts.push((mezuzahBags.length === 1 ? 'שקית מזוזות אחת' : mezuzahBags.length + ' שקיות מזוזות') + ' (' + mezuzahCount + ' מזוזות בפועל)');
+  const others = {};
+  bags.filter(b => !b.item_type.startsWith('tefillin_') && b.item_type !== 'mezuzah')
+    .forEach(b => { others[b.item_type] = (others[b.item_type] || 0) + 1; });
+  Object.entries(others).forEach(([type, n]) => parts.push(n + ' ' + (ITEM_LABELS[type] || type)));
+  return ' — ' + parts.join(' · ');
+}
+
+function renderRows(bags, extraLine, clickable, withHistory, extraButton){
   return bags.map(b => {
     const who = esc(b.customer.first_name) + ' ' + esc(b.customer.last_name);
     const item = (ITEM_LABELS[b.item_type] || b.item_type) + (b.quantity > 1 ? ' ×' + b.quantity : '') +
@@ -386,7 +403,7 @@ function renderRows(bags, extraLine, clickable, withHistory){
     return '<div><div class="check-row"' + (clickable ? ' data-code="' + b.bag_code + '" style="cursor:pointer;"' : '') + '>' +
       '<div><div class="who">' + b.bag_code + ' · ' + who + '</div>' +
       '<div class="sub">' + esc(b.customer.phone) + ' · הזמנה #' + b.order_number + ' · ' + item + noteInfo + broughtInfo + (extraLine ? extraLine(b) : '') + '</div></div>' +
-      histBtn + '</div>' + histBox + '</div>';
+      (extraButton && !clickable ? extraButton(b) : '') + histBtn + '</div>' + histBox + '</div>';
   }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:16px;">אין שקיות מתאימות</div>';
 }
 function wireRowClicks(containerId){
@@ -412,7 +429,7 @@ async function loadPending(){
 function renderPending(){
   const q = document.getElementById('pendingSearch').value.trim().toLowerCase();
   const filtered = pendingBags.filter(b => matchesSearch(b, q));
-  document.getElementById('pendingCount').textContent = filtered.length + ' שקיות ממתינות';
+  document.getElementById('pendingCount').textContent = filtered.length + ' שקיות ממתינות' + pendingBreakdown(filtered);
   const active = quickAction && quickAction.mount === 'pending';
   document.getElementById('pendingBody').innerHTML = renderRows(filtered, null, active);
   if (active) wireRowClicks('pendingBody');
@@ -448,8 +465,12 @@ function renderMine(){
   document.getElementById('mineBody').innerHTML = renderRows(filtered, (b) =>
     ' · ' + (STAGE_LABELS[b.stage] || b.stage) +
     (b.picked_up_at ? ' · אצלי מאז ' + new Date(b.picked_up_at).toLocaleDateString('he-IL') : '') +
-    (b.report_received_at ? ' · 📋 נשלח דוח' : ''), active);
+    (b.report_received_at ? ' · 📋 נשלח דוח' : ''), active, false,
+    // "נמסר ללקוח" — רק לשקיות שעדיין אצלו (לא לכאלה שכבר הוחזרו לחנות בשעתיים האחרונות)
+    (b) => b.status === 'with_supplier'
+      ? '<button type="button" class="reload directBtn" data-code="' + b.bag_code + '" style="flex-shrink:0;margin-inline-start:auto;white-space:nowrap;">🤝 נמסר ללקוח</button>' : '');
   if (active) wireRowClicks('mineBody');
+  document.querySelectorAll('#mineBody .directBtn').forEach(btn => btn.addEventListener('click', () => deliverDirect(btn.dataset.code)));
 }
 document.getElementById('mineReload').onclick = loadMine;
 document.getElementById('mineSearch').addEventListener('input', renderMine);
@@ -644,11 +665,11 @@ document.getElementById('quickCameraSwitch').addEventListener('click', switchQui
 // מחיקה מחזירה את השקית למצב שלפני אותה פעולה (DELETE /api/orders/activity-log/:id, ראו README).
 const SUPPLIER_LOG_LABELS = {
   order_created: 'הזמנה נוצרה', bag_added: 'שקית נוספה', label_reprinted: 'מדבקה הודפסה שוב',
-  report_received: '📋 נשלח דוח', released: 'מוכן — שוחרר מהתוכנה', picked_up: 'נאסף ע"י מיכאל', returned: 'הוחזר ממיכאל', customer_notified: 'עודכן ללקוח',
+  report_received: '📋 נשלח דוח', delivered_direct: '🤝 נמסר ללקוח ישירות', released: 'מוכן — שוחרר מהתוכנה', picked_up: 'נאסף ע"י מיכאל', returned: 'הוחזר ממיכאל', customer_notified: 'עודכן ללקוח',
   customer_collected: 'נאסף ע"י לקוח', manual_fix: 'תיקון ידני (חנות)', print_failed: 'הדפסת מדבקה נכשלה',
   supplier_update: '✏️ תיקון פרטים', customer_linked: 'דווח מספר לקוח', order_edited: 'ההזמנה נערכה בחנות',
 };
-const SUPPLIER_EDITABLE_ACTIONS = new Set(['picked_up', 'released', 'returned']);
+const SUPPLIER_EDITABLE_ACTIONS = new Set(['picked_up', 'released', 'returned', 'delivered_direct']);
 function logWhenHtml(entry){
   const d = new Date(entry.created_at);
   const greg = d.toLocaleDateString('he-IL') + ' ' + d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
@@ -721,7 +742,10 @@ function renderHistoryList(){
   const shown = filtered.slice(0, 100);
   document.getElementById('historyCount').textContent = filtered.length + ' שקיות' + (filtered.length > shown.length ? ' (מוצגות 100 האחרונות — חפש כדי לצמצם)' : '');
   document.getElementById('historyBody').innerHTML = renderRows(shown, (b) =>
-    ' · ' + (b.status === 'returned'
+    ' · ' + (b.status === 'delivered_direct'
+      ? '🤝 נמסר ללקוח ישירות' + (b.delivered_direct_at ? ' ' + new Date(b.delivered_direct_at).toLocaleDateString('he-IL') : '') +
+        (b.delivered_direct_note ? ' (' + esc(b.delivered_direct_note) + ')' : '')
+      : b.status === 'returned'
       ? 'הוחזר' + (b.returned_at ? ' ' + new Date(b.returned_at).toLocaleDateString('he-IL') : '')
       : 'אצלי' + (b.picked_up_at ? ' מאז ' + new Date(b.picked_up_at).toLocaleDateString('he-IL') : '')), false, true);
   document.querySelectorAll('#historyBody .histBtn').forEach(btn => btn.addEventListener('click', () => {
@@ -772,6 +796,28 @@ document.getElementById('qaCameraBtn').addEventListener('click', async () => {
   showScanMode(false);
   await startQuickCamera();
 });
+// --- "🤝 נמסר ללקוח": השקית לא חוזרת לחנות — מיכאל מסר אותה ללקוח בדרך אחרת. אישור + הערה לא חובה (איך נמסר).
+// אחרי זה היא יורדת מ"אצלי" ולא מחכה למסירה לחנות. ניתן לביטול מטאב ההיסטוריה.
+async function deliverDirect(code){
+  const note = prompt('לסמן ששקית ' + code + ' נמסרה ללקוח ישירות (ולא תחזור לחנות)?\nאפשר לכתוב איך נמסרה (לא חובה):', '');
+  if (note === null) return; // ביטול
+  try {
+    const res = await fetch('/api/supplier/deliver-direct', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bag_code: code, note }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה');
+    const who = data.bag.customer.first_name + ' ' + data.bag.customer.last_name;
+    flashScan('ok', code, itemText(data.bag.item_type, data.bag.quantity), '🤝 נמסר ללקוח ישירות', who);
+    beep(880, 0.15);
+  } catch (err) {
+    flashScan('warn', code, '', err.message);
+    beep(220, 0.3);
+  }
+  loadMine();
+}
 </script>
 </body>
 </html>

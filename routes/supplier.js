@@ -30,6 +30,7 @@ async function loadBag(code) {
 
 // שלב תצוגה למסך "מה אצלי": אספתי (עוד לא נמשך ע"י התוכנה) / נכנס לתוכנה (נמשך) / במסירה לחנות (כבר הוחזר).
 function bagStage(bag) {
+  if (bag.status === "delivered_direct") return "delivered_direct";
   if (bag.status === "returned") return "returning";
   if (bag.ready_at) return "ready"; // התוכנה שלו שלחה דוח ושחררה — מוכן אצלו, עוד לא נמסר לחנות
   return bag.imported_at ? "imported" : "collected";
@@ -51,6 +52,8 @@ function serializeBag(bag) {
     imported_at: bag.imported_at,
     ready_at: bag.ready_at || null,
     returned_at: bag.returned_at,
+    delivered_direct_at: bag.delivered_direct_at || null,
+    delivered_direct_note: bag.delivered_direct_note || null,
     report_received_at: bag.report_received_at || null, // null = עוד לא נשלח דוח על השקית
     collection_number: bag.collection_number || null,
     collection_started_at: bag.collection_started_at || null,
@@ -297,6 +300,35 @@ router.get("/report/:code", asyncHandler(async (req, res) => {
     [bag.id]
   );
   res.json({ bag_code: bag.bag_code, reports: rows });
+}));
+
+// "נמסר ללקוח ישירות" — השקית לא חוזרת לחנות: מיכאל מסר אותה ללקוח בדרך אחרת. סטטוס סופי delivered_direct,
+// יורדת מ"אצלי" (with-me) ולא מחכה למסירה לחנות. גוף: {bag_code, note?} (note = איך נמסר, לא חובה).
+// ניתן לביטול מההיסטוריה (snapshot ב-prev_state).
+router.post("/deliver-direct", asyncHandler(async (req, res) => {
+  const { bag_code, note } = req.body || {};
+  if (!bag_code) {
+    res.status(400).json({ error: "bag_code נדרש" });
+    return;
+  }
+  const bag = await loadBag(String(bag_code));
+  if (!bag) {
+    res.status(404).json({ error: "קוד לא מוכר" });
+    return;
+  }
+  if (bag.status !== "with_supplier") {
+    res.status(409).json({ error: "אפשר לסמן רק שקית שנמצאת אצל הספק" });
+    return;
+  }
+  const cleanNote = String(note || "").trim().slice(0, 300) || null;
+  const prev = (await snapshotBagStates([bag.bag_code])).get(bag.bag_code);
+  await pool.query(
+    `update bags set status = 'delivered_direct', delivered_direct_at = now(), delivered_direct_note = $2, updated_at = now()
+     where id = $1`,
+    [bag.id, cleanNote]
+  );
+  logActivity(bag.bag_code, bag.order_number, "delivered_direct", cleanNote, prev);
+  res.json({ ok: true, bag: serializeBag(await loadBag(bag.bag_code)) });
 }));
 
 // תיקון פרטים מהספק — כשמיכאל מגלה שמשהו נרשם לא נכון בקבלה (כמות, סוג, פרטי פריט, או שם/טלפון/כתובת של הלקוח).

@@ -61,7 +61,7 @@ function printBagLabel(order_number, customer, bag) {
 // המשיכה בפועל לתוכנה שלו עדיין אפשר לתקן טעויות בצד שלנו.
 async function isOrderLocked(orderId) {
   const { rows } = await pool.query(
-    "select 1 from bags where order_id = $1 and (imported_at is not null or status = 'returned') limit 1",
+    "select 1 from bags where order_id = $1 and (imported_at is not null or status in ('returned', 'delivered_direct')) limit 1",
     [orderId]
   );
   return rows.length > 0;
@@ -238,7 +238,7 @@ router.get("/bags", asyncHandler(async (req, res) => {
   const { rows } = await pool.query(
     `select o.order_number, o.brought_by, c.first_name, c.last_name, c.phone,
             b.bag_code, b.item_type, b.item_type_note, b.quantity, b.variant, b.status,
-            b.picked_up_at, b.imported_at, b.ready_at, b.returned_at, b.customer_notified_at, b.customer_collected_at, b.created_at,
+            b.picked_up_at, b.imported_at, b.ready_at, b.returned_at, b.delivered_direct_at, b.delivered_direct_note, b.customer_notified_at, b.customer_collected_at, b.created_at,
             (select max(r.received_at) from bag_reports r where r.bag_id = b.id) as report_received_at,
             col.collection_number, col.started_at as collection_started_at
      from bags b
@@ -398,9 +398,9 @@ const withHebrewDates = (rows) => rows.map((r) => ({ ...r, created_at_hebrew: to
 
 // פעולות שמשנות את מצב השקית — מחיקה שלהן מההיסטוריה מחזירה את השקית למצב שלפניהן.
 // (השוואות זמן נעשות ב-SQL מול השורה עצמה: Date של JS מאבד את המיקרו-שניות של timestamptz.)
-const STATE_ACTIONS = ["picked_up", "released", "returned", "customer_notified", "customer_collected", "manual_fix"];
+const STATE_ACTIONS = ["picked_up", "released", "returned", "delivered_direct", "customer_notified", "customer_collected", "manual_fix"];
 const STATE_ACTION_LABELS = {
-  picked_up: "נאסף ע\"י מיכאל", released: "מוכן אצל מיכאל (שוחרר מהתוכנה)", returned: "הוחזר ממיכאל", customer_notified: "עודכן ללקוח",
+  delivered_direct: "נמסר ללקוח ע\"י מיכאל", picked_up: "נאסף ע\"י מיכאל", released: "מוכן אצל מיכאל (שוחרר מהתוכנה)", returned: "הוחזר ממיכאל", customer_notified: "עודכן ללקוח",
   customer_collected: "נאסף ע\"י לקוח", manual_fix: "תיקון ידני",
   label_reprinted: "מדבקה הודפסה שוב", print_failed: "הדפסה נכשלה", bag_added: "שקית נוספה",
 };
@@ -413,6 +413,8 @@ async function derivePrevState(client, row) {
       return { status: "waiting_pickup", collection_id: null, picked_up_at: null, imported_at: null };
     case "released":
       return { ready_at: null };
+    case "delivered_direct":
+      return { status: "with_supplier", delivered_direct_at: null, delivered_direct_note: null };
     case "returned":
       return { status: "with_supplier", returned_at: null, customer_notified_at: null, customer_collected_at: null };
     case "customer_notified": {
@@ -603,13 +605,14 @@ router.get("/:order_number", asyncHandler(async (req, res) => {
   }
   const bags = await pool.query(
     `select bag_code, item_type, item_type_note, quantity, variant, status, result, picked_up_at, returned_at, imported_at, ready_at,
+            delivered_direct_at, delivered_direct_note,
             customer_notified_at, customer_collected_at,
             (select max(r.received_at) from bag_reports r where r.bag_id = bags.id) as report_received_at
      from bags where order_id = $1 order by bag_code`,
     [o.rows[0].id]
   );
   const { id, ...order } = o.rows[0];
-  const locked = bags.rows.some((b) => b.imported_at != null || b.status === "returned");
+  const locked = bags.rows.some((b) => b.imported_at != null || b.status === "returned" || b.status === "delivered_direct");
   res.json({ ...order, locked, bags: bags.rows });
 }));
 
@@ -763,7 +766,7 @@ router.get("/bags/:bag_code/reports", asyncHandler(async (req, res) => {
   res.json({ reports: rows.map((r) => ({ ...r, received_at_hebrew: toHebrewDate(r.received_at) })) });
 }));
 // עם אפשרות לאפס את חותמות הלקוח. כל שימוש נרשם ביומן הפעולות לצורך מעקב.
-const BAG_STATUSES = ["waiting_pickup", "with_supplier", "returned"];
+const BAG_STATUSES = ["waiting_pickup", "with_supplier", "returned", "delivered_direct"];
 router.put("/bags/:bag_code/force-status", asyncHandler(async (req, res) => {
   const { status, reset_notified, reset_collected } = req.body || {};
   if (!BAG_STATUSES.includes(status)) {

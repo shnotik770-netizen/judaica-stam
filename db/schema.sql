@@ -142,3 +142,11 @@ alter table bags add column if not exists variant jsonb;
 -- "מוכן אצל מיכאל": התוכנה של הספק סיימה את הבדיקה ושלחה דוח (POST /api/supplier/report) — השקית שוחררה
 -- מהתוכנה אבל עדיין פיזית אצלו. רק "מסירה לחנות" (bulk-scan return) מעבירה ל-returned, כדי שנדע שהגיעה לחנות.
 alter table bags add column if not exists ready_at timestamptz;
+
+-- "נמסר ללקוח ע"י מיכאל": השקית לא חזרה לחנות — מיכאל מסר אותה ללקוח בדרך אחרת (סטטוס סופי delivered_direct).
+-- מרחיבים את ה-check של status (נוצר אוטומטית בשם bags_status_check) — drop+add, idempotent.
+alter table bags add column if not exists delivered_direct_at timestamptz;
+alter table bags add column if not exists delivered_direct_note text;
+alter table bags drop constraint if exists bags_status_check;
+alter table bags add constraint bags_status_check
+  check (status in ('waiting_pickup','with_supplier','returned','delivered_direct'));
