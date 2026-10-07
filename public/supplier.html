@@ -393,7 +393,8 @@ function renderRows(bags, extraLine, clickable, withHistory, extraButton){
   return bags.map(b => {
     const who = esc(b.customer.first_name) + ' ' + esc(b.customer.last_name);
     const item = (ITEM_LABELS[b.item_type] || b.item_type) + (b.quantity > 1 ? ' ×' + b.quantity : '') +
-      (b.variant ? ' (' + variantText(b.variant) + ')' : '');
+      (b.variant || b.mezuzah_cases != null
+        ? ' (' + [variantText(b.variant), b.mezuzah_cases != null ? b.mezuzah_cases + ' בתי מזוזה' : ''].filter(Boolean).join(' · ') + ')' : '');
     const noteInfo = b.item_type_note ? ' · 📝 ' + esc(b.item_type_note) : '';
     const broughtInfo = b.brought_by ? ' · הובא ע"י ' + esc(b.brought_by) : '';
     const histBtn = withHistory && !clickable

@@ -150,3 +150,6 @@ alter table bags add column if not exists delivered_direct_note text;
 alter table bags drop constraint if exists bags_status_check;
 alter table bags add constraint bags_status_check
   check (status in ('waiting_pickup','with_supplier','returned','delivered_direct'));
+
+-- כמה בתי מזוזה הגיעו עם המזוזות (נשאל בקבלה; לא חובה). רק למזוזה, 0..quantity. null = לא נשאל.
+alter table bags add column if not exists mezuzah_cases int;

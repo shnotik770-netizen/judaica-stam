@@ -3,7 +3,7 @@ import { pool } from "../lib/db.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import { logActivity, snapshotBagStates } from "../lib/activityLog.js";
 import { ITEM_TYPES, ITEM_TYPE_LABELS } from "../lib/itemTypes.js";
-import { VARIANT_FIELDS, cleanVariant } from "../lib/variant.js";
+import { VARIANT_FIELDS, cleanVariant, cleanMezuzahCases } from "../lib/variant.js";
 
 export const router = express.Router();
 // ללא אימות בכוונה — החלטת המשתמש: מיכאל אמור להיות מחובר תמיד בלי להזין מפתח כדי לעבוד.
@@ -48,6 +48,8 @@ function serializeBag(bag) {
     quantity: bag.quantity,
     // פרטי הפריט בקודים המוסכמים עם הספק (lib/variant.js); null = לא נשאל כלום בקבלה
     variant: bag.variant || null,
+    // כמה בתי מזוזה הגיעו עם המזוזות (רק למזוזה; null = לא נשאל בקבלה)
+    mezuzah_cases: bag.mezuzah_cases ?? null,
     picked_up_at: bag.picked_up_at,
     imported_at: bag.imported_at,
     ready_at: bag.ready_at || null,
@@ -380,6 +382,17 @@ async function applySupplierUpdate(item) {
       }
     }
     if (JSON.stringify(before) !== JSON.stringify(after)) bagSets.variant = cleaned.variant ? JSON.stringify(cleaned.variant) : null;
+  }
+  // בתי מזוזה — נבדק מול הכמות והסוג אחרי התיקון (גם אם רק הכמות/הסוג השתנו)
+  if (item.mezuzah_cases !== undefined || bagSets.item_type || bagSets.quantity) {
+    const qty = bagSets.quantity ?? bag.quantity;
+    const wanted = item.mezuzah_cases !== undefined ? item.mezuzah_cases : bag.mezuzah_cases;
+    const cases = cleanMezuzahCases(itemType, wanted, qty);
+    if (cases.error) return { bag_code, ok: false, error: cases.error };
+    if (cases.value !== (bag.mezuzah_cases ?? null)) {
+      bagSets.mezuzah_cases = cases.value;
+      changes.push(`בתי מזוזה: מ-${shown(bag.mezuzah_cases)} ל-${shown(cases.value)}`);
+    }
   }
   // פרטי לקוח
   const customerSets = {};

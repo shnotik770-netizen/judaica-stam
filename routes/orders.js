@@ -6,7 +6,7 @@ import { toHebrewDate } from "../lib/hebrewDate.js";
 import { sendSms } from "../lib/call2all.js";
 import { logActivity, snapshotBagStates, BAG_STATE_FIELDS } from "../lib/activityLog.js";
 import { getSetting, setSetting } from "../lib/settings.js";
-import { cleanVariant, variantText } from "../lib/variant.js";
+import { cleanVariant, variantText, cleanMezuzahCases } from "../lib/variant.js";
 import { ITEM_TYPES, ITEM_TYPE_LABELS } from "../lib/itemTypes.js";
 
 export const router = express.Router();
@@ -47,7 +47,8 @@ function printBagLabel(order_number, customer, bag) {
     customer.phone,
     toHebrewDate(new Date()),
     `${ITEM_TYPE_LABELS[bag.item_type] || bag.item_type}${bag.quantity > 1 ? ` ×${bag.quantity}` : ""}` +
-      (bag.variant ? ` · ${variantText(bag.variant)}` : ""),
+      (bag.variant ? ` · ${variantText(bag.variant)}` : "") +
+      (bag.mezuzah_cases != null ? ` · ${bag.mezuzah_cases} בתי מזוזה` : ""),
   ].join("\n");
   enqueuePrint({ text, barcode: bag.bag_code, copies: 1 }).catch((e) => {
     console.error("enqueuePrint failed", bag.bag_code, e.message);
@@ -83,6 +84,9 @@ router.post("/", asyncHandler(async (req, res) => {
     const v = cleanVariant(b.item_type, b.variant);
     if (v.error) { res.status(400).json({ error: v.error }); return; }
     b.variant = v.variant;
+    const cases = cleanMezuzahCases(b.item_type, b.mezuzah_cases, b.quantity);
+    if (cases.error) { res.status(400).json({ error: cases.error }); return; }
+    b.mezuzah_cases = cases.value;
   }
 
   const client = await pool.connect();
@@ -124,9 +128,9 @@ router.post("/", asyncHandler(async (req, res) => {
       const b = bags[i];
       const bagCode = makeBagCode(order_number, i + 1);
       const r = await client.query(
-        `insert into bags (order_id, bag_code, item_type, item_type_note, quantity, variant)
-         values ($1,$2,$3,$4,$5,$6) returning bag_code, item_type, quantity, variant`,
-        [orderId, bagCode, b.item_type, b.item_type_note || null, b.quantity || 1, b.variant ? JSON.stringify(b.variant) : null]
+        `insert into bags (order_id, bag_code, item_type, item_type_note, quantity, variant, mezuzah_cases)
+         values ($1,$2,$3,$4,$5,$6,$7) returning bag_code, item_type, quantity, variant, mezuzah_cases`,
+        [orderId, bagCode, b.item_type, b.item_type_note || null, b.quantity || 1, b.variant ? JSON.stringify(b.variant) : null, b.mezuzah_cases]
       );
       createdBags.push(r.rows[0]);
     }
@@ -237,7 +241,7 @@ router.get("/bags", asyncHandler(async (req, res) => {
 
   const { rows } = await pool.query(
     `select o.order_number, o.brought_by, c.first_name, c.last_name, c.phone,
-            b.bag_code, b.item_type, b.item_type_note, b.quantity, b.variant, b.status,
+            b.bag_code, b.item_type, b.item_type_note, b.quantity, b.variant, b.mezuzah_cases, b.status,
             b.picked_up_at, b.imported_at, b.ready_at, b.returned_at, b.delivered_direct_at, b.delivered_direct_note, b.customer_notified_at, b.customer_collected_at, b.created_at,
             (select max(r.received_at) from bag_reports r where r.bag_id = b.id) as report_received_at,
             col.collection_number, col.started_at as collection_started_at
@@ -604,7 +608,7 @@ router.get("/:order_number", asyncHandler(async (req, res) => {
     return;
   }
   const bags = await pool.query(
-    `select bag_code, item_type, item_type_note, quantity, variant, status, result, picked_up_at, returned_at, imported_at, ready_at,
+    `select bag_code, item_type, item_type_note, quantity, variant, mezuzah_cases, status, result, picked_up_at, returned_at, imported_at, ready_at,
             delivered_direct_at, delivered_direct_note,
             customer_notified_at, customer_collected_at,
             (select max(r.received_at) from bag_reports r where r.bag_id = bags.id) as report_received_at
@@ -657,9 +661,14 @@ router.put("/:order_number", asyncHandler(async (req, res) => {
       res.status(400).json({ error: v.error });
       return;
     }
+    const cases = cleanMezuzahCases(b.item_type, b.mezuzah_cases, b.quantity);
+    if (cases.error) {
+      res.status(400).json({ error: cases.error });
+      return;
+    }
     await pool.query(
-      "update bags set item_type=$1, item_type_note=$2, quantity=$3, variant=$4, updated_at=now() where bag_code=$5 and order_id=$6",
-      [b.item_type, b.item_type_note || null, b.quantity || 1, v.variant ? JSON.stringify(v.variant) : null, b.bag_code, orderId]
+      "update bags set item_type=$1, item_type_note=$2, quantity=$3, variant=$4, mezuzah_cases=$5, updated_at=now() where bag_code=$6 and order_id=$7",
+      [b.item_type, b.item_type_note || null, b.quantity || 1, v.variant ? JSON.stringify(v.variant) : null, cases.value, b.bag_code, orderId]
     );
   }
 
@@ -677,6 +686,11 @@ router.post("/:order_number/bags", asyncHandler(async (req, res) => {
   const cleaned = cleanVariant(item_type, req.body.variant);
   if (cleaned.error) {
     res.status(400).json({ error: cleaned.error });
+    return;
+  }
+  const cases = cleanMezuzahCases(item_type, req.body.mezuzah_cases, quantity);
+  if (cases.error) {
+    res.status(400).json({ error: cases.error });
     return;
   }
   const o = await pool.query(
@@ -702,9 +716,9 @@ router.post("/:order_number/bags", asyncHandler(async (req, res) => {
   const bagCode = makeBagCode(order.order_number, nextIndex);
 
   const r = await pool.query(
-    `insert into bags (order_id, bag_code, item_type, item_type_note, quantity, variant)
-     values ($1,$2,$3,$4,$5,$6) returning bag_code, item_type, item_type_note, quantity, status, variant`,
-    [order.id, bagCode, item_type, item_type_note || null, quantity || 1, cleaned.variant ? JSON.stringify(cleaned.variant) : null]
+    `insert into bags (order_id, bag_code, item_type, item_type_note, quantity, variant, mezuzah_cases)
+     values ($1,$2,$3,$4,$5,$6,$7) returning bag_code, item_type, item_type_note, quantity, status, variant, mezuzah_cases`,
+    [order.id, bagCode, item_type, item_type_note || null, quantity || 1, cleaned.variant ? JSON.stringify(cleaned.variant) : null, cases.value]
   );
   const bag = r.rows[0];
   printBagLabel(order.order_number, order, bag);
@@ -794,7 +808,7 @@ router.put("/bags/:bag_code/force-status", asyncHandler(async (req, res) => {
 // עדיין), או שהמדבקה הפיזית אבדה/נקרעה. מותר גם על הזמנה נעולה — לא משנה שום מצב, רק מדפיס שוב.
 router.post("/bags/:bag_code/reprint", asyncHandler(async (req, res) => {
   const { rows } = await pool.query(
-    `select b.bag_code, b.item_type, b.quantity, b.variant, o.order_number, c.first_name, c.last_name, c.phone
+    `select b.bag_code, b.item_type, b.quantity, b.variant, b.mezuzah_cases, o.order_number, c.first_name, c.last_name, c.phone
      from bags b join orders o on o.id = b.order_id join customers c on c.id = o.customer_id
      where b.bag_code = $1`,
     [req.params.bag_code]

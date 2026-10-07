@@ -415,7 +415,12 @@ const VARIANT_BY_ITEM_TYPE = {
   mezuzah: ['form'],
 };
 // שדות בחירה לפי סוג הפריט; ברירת מחדל "לא צוין" (= לא נשלח לספק, הוא משלים אצלו)
-function variantFieldsHtml(itemType, variant, disabled){
+function variantFieldsHtml(itemType, variant, disabled, cases){
+  // למזוזה: גם כמה בתי מזוזה הגיעו (לא חובה; לא יותר ממספר המזוזות — נבדק גם בשרת)
+  const casesField = itemType === 'mezuzah'
+    ? '<div class="field"><label>בתי מזוזה</label><input type="number" class="casesInput" min="0" inputmode="numeric" placeholder="כמה בתים הגיעו?"' +
+      (cases != null ? ' value="' + cases + '"' : '') + (disabled ? ' disabled' : '') + '></div>'
+    : '';
   return (VARIANT_BY_ITEM_TYPE[itemType] || []).map(key => {
     const f = VARIANT_FIELDS[key];
     const current = variant && variant[key];
@@ -423,7 +428,13 @@ function variantFieldsHtml(itemType, variant, disabled){
       '<option value="">לא צוין</option>' +
       Object.entries(f.options).map(([v, label]) => '<option value="' + v + '"' + (v === current ? ' selected' : '') + '>' + label + '</option>').join('') +
       '</select></div>';
-  }).join('');
+  }).join('') + casesField;
+}
+// כמה בתי מזוזה (null = לא צוין)
+function readCases(container){
+  const input = container && container.querySelector('.casesInput');
+  if (!input || input.value === '') return null;
+  return +input.value;
 }
 function readVariant(container){
   const out = {};
@@ -537,8 +548,15 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
     item_type_note: b.querySelector('.note')?.value || null,
     quantity: +b.querySelector('.qty').value || 1,
     variant: readVariant(b),
+    mezuzah_cases: readCases(b),
   }));
   if (bags.length === 0) { msg.className = 'msg err'; msg.textContent = 'צריך לפחות שקית אחת.'; return; }
+  const tooManyCases = bags.findIndex(b => b.mezuzah_cases != null && (b.mezuzah_cases < 0 || b.mezuzah_cases > b.quantity));
+  if (tooManyCases >= 0) {
+    msg.className = 'msg err';
+    msg.textContent = 'שקית ' + (tooManyCases + 1) + ': מספר בתי המזוזה לא יכול להיות גדול ממספר המזוזות (' + bags[tooManyCases].quantity + ').';
+    return;
+  }
   // כתובת לא חובה — מזהירים ומאפשרים להמשיך
   if (!document.getElementById('address').value.trim() &&
       !confirm('חסרה כתובת ללקוח. להמשיך וליצור את ההזמנה בלי כתובת?')) {
@@ -661,7 +679,8 @@ async function loadList(){
     listEl.innerHTML = data.bags.map(b => {
       const when = (b.created_at_hebrew ? b.created_at_hebrew + ' · ' : '') + new Date(b.created_at).toLocaleDateString('he-IL');
       const item = (ITEM_LABELS[b.item_type] || b.item_type) + (b.quantity > 1 ? ' ×' + b.quantity : '') +
-        (b.variant ? ' (' + variantText(b.variant) + ')' : '');
+        (b.variant || b.mezuzah_cases != null
+          ? ' (' + [variantText(b.variant), b.mezuzah_cases != null ? b.mezuzah_cases + ' בתי מזוזה' : ''].filter(Boolean).join(' · ') + ')' : '');
       const collectionInfo = b.collection_number
         ? ' · איסוף #' + b.collection_number + ' (' + new Date(b.collection_started_at).toLocaleDateString('he-IL') + ')'
         : '';
@@ -749,7 +768,7 @@ function renderEdit(data){
       '<div class="field"><label>כמות</label><input type="number" class="editQty" data-code="' + b.bag_code + '" value="' + b.quantity + '" min="1"' + (editLocked ? ' disabled' : '') + '></div>' +
       '<div class="field"><label>הערות</label><input class="editNote" data-code="' + b.bag_code + '" placeholder="הערה לשקית (לא חובה)" value="' + esc(b.item_type_note || '') + '"' + (editLocked ? ' disabled' : '') + '></div>' +
       '</div>' +
-      '<div class="variant-row" data-code="' + b.bag_code + '">' + variantFieldsHtml(b.item_type, b.variant, editLocked) + '</div>' +
+      '<div class="variant-row" data-code="' + b.bag_code + '">' + variantFieldsHtml(b.item_type, b.variant, editLocked, b.mezuzah_cases) + '</div>' +
       '<div class="hidden report-box" id="report-' + b.bag_code + '"></div>' +
       '<div class="hidden" id="history-' + b.bag_code + '" style="display:flex;flex-direction:column;gap:5px;border-top:1px solid var(--border);padding-top:8px;"></div>' +
       '</div>';
@@ -757,7 +776,7 @@ function renderEdit(data){
 
   document.querySelectorAll('.editItemType').forEach(sel => sel.addEventListener('change', () => {
     const row = document.querySelector('.variant-row[data-code="' + sel.dataset.code + '"]');
-    row.innerHTML = variantFieldsHtml(sel.value, readVariant(row), false);
+    row.innerHTML = variantFieldsHtml(sel.value, readVariant(row), false, readCases(row));
   }));
   document.querySelectorAll('.editDelBag').forEach(btn => btn.addEventListener('click', async () => {
     if (!confirm('למחוק את שקית ' + btn.dataset.code + '?')) return;
@@ -878,8 +897,10 @@ document.getElementById('editSave').addEventListener('click', async () => {
     const code = sel.dataset.code;
     const qty = document.querySelector('.editQty[data-code="' + code + '"]').value;
     const note = document.querySelector('.editNote[data-code="' + code + '"]').value;
-    const variant = readVariant(document.querySelector('.variant-row[data-code="' + code + '"]'));
-    return { bag_code: code, item_type: sel.value, item_type_note: note || null, quantity: +qty || 1, variant };
+    const variantRowEl = document.querySelector('.variant-row[data-code="' + code + '"]');
+    const variant = readVariant(variantRowEl);
+    const mezuzah_cases = readCases(variantRowEl);
+    return { bag_code: code, item_type: sel.value, item_type_note: note || null, quantity: +qty || 1, variant, mezuzah_cases };
   });
   const body = {
     customer: {
