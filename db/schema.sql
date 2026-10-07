@@ -129,3 +129,7 @@ create table if not exists bag_reports (
   received_at timestamptz not null default now()
 );
 create index if not exists idx_bag_reports_bag on bag_reports(bag_id, received_at desc);
+
+-- "הובא ע"י" — מי הביא את הפריטים לחנות בשם הלקוח (לא חובה). כשמולא, ההזמנה לא משויכת ללקוח קיים
+-- לפי טלפון (תמיד נוצר לקוח חדש) — כי הטלפון שנמסר עלול להיות של המביא ולא של בעל הפריטים.
+alter table orders add column if not exists brought_by text;

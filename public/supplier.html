@@ -366,13 +366,14 @@ function renderRows(bags, extraLine, clickable, withHistory){
     const who = esc(b.customer.first_name) + ' ' + esc(b.customer.last_name);
     const item = (ITEM_LABELS[b.item_type] || b.item_type) + (b.quantity > 1 ? ' ×' + b.quantity : '');
     const noteInfo = b.item_type_note ? ' · 📝 ' + esc(b.item_type_note) : '';
+    const broughtInfo = b.brought_by ? ' · הובא ע"י ' + esc(b.brought_by) : '';
     const histBtn = withHistory && !clickable
       ? '<button type="button" class="reload histBtn" data-code="' + b.bag_code + '" style="flex-shrink:0;margin-inline-start:auto;">🕘 היסטוריה</button>' : '';
     const histBox = withHistory && !clickable
       ? '<div class="hidden" id="shist-' + b.bag_code + '" style="display:flex;flex-direction:column;gap:5px;padding:4px 12px 8px;"></div>' : '';
     return '<div><div class="check-row"' + (clickable ? ' data-code="' + b.bag_code + '" style="cursor:pointer;"' : '') + '>' +
       '<div><div class="who">' + b.bag_code + ' · ' + who + '</div>' +
-      '<div class="sub">' + esc(b.customer.phone) + ' · הזמנה #' + b.order_number + ' · ' + item + noteInfo + (extraLine ? extraLine(b) : '') + '</div></div>' +
+      '<div class="sub">' + esc(b.customer.phone) + ' · הזמנה #' + b.order_number + ' · ' + item + noteInfo + broughtInfo + (extraLine ? extraLine(b) : '') + '</div></div>' +
       histBtn + '</div>' + histBox + '</div>';
   }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:16px;">אין שקיות מתאימות</div>';
 }

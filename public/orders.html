@@ -208,6 +208,7 @@
       <div class="field"><label>טלפון</label><input required id="phone" type="tel" inputmode="numeric" autocomplete="tel"></div>
       <div class="field"><label>כתובת</label><input id="address" placeholder="לא חובה"></div>
     </div>
+    <div class="field"><label>הובא ע"י</label><input id="broughtBy" placeholder="לא חובה — אם מישהו אחר הביא בשם הלקוח"></div>
     <div class="suggest hidden" id="customerSuggest"></div>
 
     <div id="bags"></div>
@@ -302,6 +303,7 @@
       <div class="field"><label>טלפון</label><input id="editPhone" type="tel" inputmode="numeric" autocomplete="tel"></div>
       <div class="field"><label>כתובת</label><input id="editAddress"></div>
     </div>
+    <div class="field"><label>הובא ע"י</label><input id="editBroughtBy" placeholder="לא חובה"></div>
 
     <div id="editBags" style="display:flex;flex-direction:column;gap:10px;"></div>
     <button type="button" class="btn-add" id="editAddBag">+ הוסף שקית</button>
@@ -432,7 +434,18 @@ function pickCustomer(c){
     (c.supplier_customer_number ? ' · מספר לקוח אצל הספק: ' + c.supplier_customer_number : '');
   suggestEl.classList.remove('hidden');
 }
+const broughtByInput = document.getElementById('broughtBy');
+// "הובא ע\"י" מולא — לא מציעים לקוחות קיימים: ההזמנה תיווצר תמיד ללקוח חדש (גם אם הטלפון תואם)
+function showBroughtByNote(){
+  suggestEl.textContent = 'הובא ע"י מישהו אחר — ייווצר לקוח חדש, בלי שיוך ללקוח קיים לפי הטלפון.';
+  suggestEl.classList.remove('hidden');
+}
+broughtByInput.addEventListener('input', () => {
+  lastSearchDigits = '';
+  if (broughtByInput.value.trim()) showBroughtByNote(); else searchCustomers();
+});
 async function searchCustomers(){
+  if (broughtByInput.value.trim()) { showBroughtByNote(); return; }
   const digits = phoneInput.value.replace(/\D/g, '');
   if (digits.length < 6) { lastSearchDigits = ''; suggestEl.classList.add('hidden'); return; }
   if (digits === lastSearchDigits) return;
@@ -482,6 +495,7 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
       phone: document.getElementById('phone').value.trim(),
       address: document.getElementById('address').value.trim(),
     },
+    brought_by: document.getElementById('broughtBy').value.trim(),
     bags,
   };
 
@@ -595,9 +609,10 @@ async function loadList(){
         : '';
       const noteInfo = b.item_type_note ? ' · 📝 ' + esc(b.item_type_note) : '';
       const reportInfo = b.report_received_at ? ' · 📋 יש דוח ממיכאל' : '';
+      const broughtInfo = b.brought_by ? ' · הובא ע"י ' + esc(b.brought_by) : '';
       return '<div class="bag-row" data-order="' + b.order_number + '" data-code="' + b.bag_code + '" style="cursor:pointer;">' +
         '<div><div class="who">' + b.bag_code + ' · ' + esc(b.first_name) + ' ' + esc(b.last_name) + '</div>' +
-        '<div class="sub">הזמנה #' + b.order_number + ' · ' + item + ' · נוצר ' + when + collectionInfo + noteInfo + reportInfo + '</div></div>' +
+        '<div class="sub">הזמנה #' + b.order_number + ' · ' + item + ' · נוצר ' + when + collectionInfo + noteInfo + broughtInfo + reportInfo + '</div></div>' +
         statusBadge(b) +
         '</div>';
     }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:20px;">אין שקיות תואמות</div>';
@@ -648,7 +663,8 @@ function renderEdit(data){
   document.getElementById('editLastName').value = data.last_name;
   document.getElementById('editPhone').value = data.phone;
   document.getElementById('editAddress').value = data.address;
-  [...document.querySelectorAll('#editFirstName,#editLastName,#editPhone,#editAddress')]
+  document.getElementById('editBroughtBy').value = data.brought_by || '';
+  [...document.querySelectorAll('#editFirstName,#editLastName,#editPhone,#editAddress,#editBroughtBy')]
     .forEach(el => el.disabled = editLocked);
 
   document.getElementById('editLockedMsg').style.display = editLocked ? 'block' : 'none';
@@ -803,6 +819,7 @@ document.getElementById('editSave').addEventListener('click', async () => {
       phone: document.getElementById('editPhone').value.trim(),
       address: document.getElementById('editAddress').value.trim(),
     },
+    brought_by: document.getElementById('editBroughtBy').value.trim(),
     bags,
   };
   try {

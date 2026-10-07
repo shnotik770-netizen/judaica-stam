@@ -104,7 +104,11 @@ router.post("/", asyncHandler(async (req, res) => {
   try {
     await client.query("begin");
 
-    const existing = await client.query("select id from customers where phone = $1", [customer.phone]);
+    // "הובא ע\"י" מולא — לא משייכים ללקוח קיים לפי טלפון (גם אם תואם), תמיד לקוח חדש
+    const broughtBy = String(req.body.brought_by || "").trim().slice(0, 200) || null;
+    const existing = broughtBy
+      ? { rows: [] }
+      : await client.query("select id from customers where phone = $1 order by created_at desc limit 1", [customer.phone]);
     let customerId;
     if (existing.rows.length > 0) {
       customerId = existing.rows[0].id;
@@ -123,9 +127,9 @@ router.post("/", asyncHandler(async (req, res) => {
     }
 
     const order = await client.query(
-      `insert into orders (order_number, customer_id, notes, target_date)
-       values (nextval('order_number_seq')::text,$1,$2,$3) returning id, order_number`,
-      [customerId, req.body.notes || null, req.body.target_date || null]
+      `insert into orders (order_number, customer_id, notes, target_date, brought_by)
+       values (nextval('order_number_seq')::text,$1,$2,$3,$4) returning id, order_number`,
+      [customerId, req.body.notes || null, req.body.target_date || null, broughtBy]
     );
     const orderId = order.rows[0].id;
     const order_number = order.rows[0].order_number;
@@ -147,7 +151,7 @@ router.post("/", asyncHandler(async (req, res) => {
     // הדפסת מדבקה לכל שקית ברגע יצירת ההזמנה — Code128, אותו קוד מספרי שהוחזר בכל שקית.
     for (const b of createdBags) printBagLabel(order_number, customer, b);
 
-    logActivity(null, order_number, "order_created", `${createdBags.length} שקיות`);
+    logActivity(null, order_number, "order_created", `${createdBags.length} שקיות` + (broughtBy ? ` · הובא ע"י ${broughtBy}` : ""));
     res.status(201).json({ order_number, bags: createdBags });
   } catch (e) {
     await client.query("rollback");
@@ -242,7 +246,7 @@ router.get("/bags", asyncHandler(async (req, res) => {
   const where = conditions.length ? "where " + conditions.join(" and ") : "";
 
   const { rows } = await pool.query(
-    `select o.order_number, c.first_name, c.last_name, c.phone,
+    `select o.order_number, o.brought_by, c.first_name, c.last_name, c.phone,
             b.bag_code, b.item_type, b.item_type_note, b.quantity, b.status,
             b.picked_up_at, b.imported_at, b.returned_at, b.customer_notified_at, b.customer_collected_at, b.created_at,
             (select max(r.received_at) from bag_reports r where r.bag_id = b.id) as report_received_at,
@@ -595,7 +599,7 @@ router.get("/", asyncHandler(async (req, res) => {
 // (imported_at) או כבר חזרה (returned) — לא ניתן יותר לערוך/למחוק את ההזמנה או שקיות שלה.
 router.get("/:order_number", asyncHandler(async (req, res) => {
   const o = await pool.query(
-    `select o.id, o.order_number, o.status, c.first_name, c.last_name, c.phone, c.address
+    `select o.id, o.order_number, o.status, o.brought_by, c.first_name, c.last_name, c.phone, c.address
      from orders o join customers c on c.id = o.customer_id
      where o.order_number = $1`,
     [req.params.order_number]
@@ -638,6 +642,10 @@ router.put("/:order_number", asyncHandler(async (req, res) => {
     return;
   }
 
+  if ("brought_by" in (req.body || {})) {
+    await pool.query("update orders set brought_by = $1, updated_at = now() where id = $2",
+      [String(req.body.brought_by || "").trim().slice(0, 200) || null, orderId]);
+  }
   await pool.query(
     "update customers set first_name=$1, last_name=$2, phone=$3, address=$4 where id=$5",
     [customer.first_name, customer.last_name, customer.phone, (customer.address || "").trim(), customerId]

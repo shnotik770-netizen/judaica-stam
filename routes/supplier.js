@@ -11,7 +11,7 @@ const DUPLICATE_WINDOW_MS = 60 * 1000;
 const COLLECTION_WINDOW_MS = 30 * 60 * 1000; // חלון קיבוץ לאיסוף: סריקה בפער של עד 30 דקות מצטרפת לאותו איסוף
 
 const BAG_SELECT = `
-  select b.*, o.order_number, o.notes as order_notes,
+  select b.*, o.order_number, o.notes as order_notes, o.brought_by,
          c.first_name, c.last_name, c.phone, c.address,
          col.collection_number, col.started_at as collection_started_at,
          (select max(r.received_at) from bag_reports r where r.bag_id = b.id) as report_received_at
@@ -36,6 +36,7 @@ function serializeBag(bag) {
   return {
     bag_code: bag.bag_code,
     order_number: bag.order_number,
+    brought_by: bag.brought_by || null, // מי הביא את הפריטים בשם הלקוח (לא חובה)
     status: bag.status,
     stage: bagStage(bag),
     item_type: bag.item_type,
