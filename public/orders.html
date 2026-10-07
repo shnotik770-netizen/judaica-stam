@@ -170,6 +170,7 @@
   .variant-row:empty{display:none;}
   .badge.ready{background:#f3e8fd;color:#6a3fb5;}
   button.more-types{background:none;border:none;color:var(--accent);font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer;padding:4px 0 0;}
+  .supplier-note{background:var(--accent-soft);color:var(--text);border-right:3px solid var(--accent);border-radius:8px;padding:8px 10px;font-size:13px;}
 </style>
 </head>
 <body>
@@ -688,9 +689,10 @@ async function loadList(){
       const reportInfo = b.report_received_at ? ' · 📋 יש דוח ממיכאל' : '';
       const broughtInfo = b.brought_by ? ' · הובא ע"י ' + esc(b.brought_by) : '';
       const directInfo = b.delivered_direct_note ? ' · 🤝 ' + esc(b.delivered_direct_note) : '';
+      const supplierNoteInfo = b.supplier_note ? ' · <b style="color:var(--accent);">💬 מיכאל: ' + esc(b.supplier_note) + '</b>' : '';
       return '<div class="bag-row" data-order="' + b.order_number + '" data-code="' + b.bag_code + '" style="cursor:pointer;">' +
         '<div><div class="who">' + b.bag_code + ' · ' + esc(b.first_name) + ' ' + esc(b.last_name) + '</div>' +
-        '<div class="sub">הזמנה #' + b.order_number + ' · ' + item + ' · נוצר ' + when + collectionInfo + noteInfo + broughtInfo + directInfo + reportInfo + '</div></div>' +
+        '<div class="sub">הזמנה #' + b.order_number + ' · ' + item + ' · נוצר ' + when + collectionInfo + noteInfo + broughtInfo + directInfo + reportInfo + supplierNoteInfo + '</div></div>' +
         statusBadge(b) +
         '</div>';
     }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:20px;">אין שקיות תואמות</div>';
@@ -762,6 +764,7 @@ function renderEdit(data){
       ? '<button type="button" class="btn-ghost editReport" data-code="' + b.bag_code + '" style="padding:6px 10px;font-size:12.5px;border-color:var(--accent);color:var(--accent);">📋 דוח ממיכאל</button>' : '';
     return '<div class="bag">' +
       '<div class="bag-head"><b>' + b.bag_code + ' · ' + statusBadge(b) + '</b><div style="display:flex;gap:8px;flex-wrap:wrap;">' + reportBtn + historyBtn + reprintBtn + delBtn + '</div></div>' +
+      (b.supplier_note ? '<div class="supplier-note">💬 <b>הערה ממיכאל:</b> ' + esc(b.supplier_note) + '</div>' : '') +
       '<div class="bag-grid">' +
       '<div class="field"><label>סוג פריט</label><select class="editItemType" data-code="' + b.bag_code + '"' + (editLocked ? ' disabled' : '') + '>' +
         itemTypeOptionsHtml(b.item_type) + '</select></div>' +
@@ -1355,7 +1358,7 @@ const LOG_ACTION_LABELS = {
   customer_notified: 'עודכן ללקוח', customer_collected: 'נאסף ע"י לקוח',
   customer_linked: 'מיכאל דיווח מספר לקוח', manual_fix: 'תיקון ידני', settings_changed: 'הגדרה עודכנה',
   report_received: '📋 התקבל דוח ממיכאל', print_failed: '⚠️ הדפסת מדבקה נכשלה', sms_failed: '⚠️ SMS ללקוח לא נשלח',
-  supplier_update: '✏️ מיכאל תיקן פרטים', delivered_direct: '🤝 נמסר ללקוח ע"י מיכאל (לא דרך החנות)',
+  supplier_update: '✏️ מיכאל תיקן פרטים', supplier_note: '💬 הערה ממיכאל', delivered_direct: '🤝 נמסר ללקוח ע"י מיכאל (לא דרך החנות)',
 };
 const LOG_ERROR_ACTIONS = new Set(['print_failed', 'sms_failed']);
 // בפעולות האלה הפירוט הטכני לא מעניין (הדוח עצמו בכפתור "דוח ממיכאל") — מציגים רק את שם הפעולה והזמן.

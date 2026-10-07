@@ -397,13 +397,14 @@ function renderRows(bags, extraLine, clickable, withHistory, extraButton){
         ? ' (' + [variantText(b.variant), b.mezuzah_cases != null ? b.mezuzah_cases + ' בתי מזוזה' : ''].filter(Boolean).join(' · ') + ')' : '');
     const noteInfo = b.item_type_note ? ' · 📝 ' + esc(b.item_type_note) : '';
     const broughtInfo = b.brought_by ? ' · הובא ע"י ' + esc(b.brought_by) : '';
+    const myNoteInfo = b.supplier_note ? ' · <b style="color:var(--accent);">📝 ההערה שלי: ' + esc(b.supplier_note) + '</b>' : '';
     const histBtn = withHistory && !clickable
       ? '<button type="button" class="reload histBtn" data-code="' + b.bag_code + '" style="flex-shrink:0;margin-inline-start:auto;">🕘 היסטוריה</button>' : '';
     const histBox = withHistory && !clickable
       ? '<div class="hidden" id="shist-' + b.bag_code + '" style="display:flex;flex-direction:column;gap:5px;padding:4px 12px 8px;"></div>' : '';
     return '<div><div class="check-row"' + (clickable ? ' data-code="' + b.bag_code + '" style="cursor:pointer;"' : '') + '>' +
       '<div><div class="who">' + b.bag_code + ' · ' + who + '</div>' +
-      '<div class="sub">' + esc(b.customer.phone) + ' · הזמנה #' + b.order_number + ' · ' + item + noteInfo + broughtInfo + (extraLine ? extraLine(b) : '') + '</div></div>' +
+      '<div class="sub">' + esc(b.customer.phone) + ' · הזמנה #' + b.order_number + ' · ' + item + noteInfo + broughtInfo + myNoteInfo + (extraLine ? extraLine(b) : '') + '</div></div>' +
       (extraButton && !clickable ? extraButton(b) : '') + histBtn + '</div>' + histBox + '</div>';
   }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:16px;">אין שקיות מתאימות</div>';
 }
@@ -468,10 +469,13 @@ function renderMine(){
     (b.picked_up_at ? ' · אצלי מאז ' + new Date(b.picked_up_at).toLocaleDateString('he-IL') : '') +
     (b.report_received_at ? ' · 📋 נשלח דוח' : ''), active, false,
     // "נמסר ללקוח" — רק לשקיות שעדיין אצלו (לא לכאלה שכבר הוחזרו לחנות בשעתיים האחרונות)
-    (b) => b.status === 'with_supplier'
-      ? '<button type="button" class="reload directBtn" data-code="' + b.bag_code + '" style="flex-shrink:0;margin-inline-start:auto;white-space:nowrap;">🤝 נמסר ללקוח</button>' : '');
+    (b) => '<div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0;margin-inline-start:auto;">' +
+      (b.status === 'with_supplier'
+        ? '<button type="button" class="reload directBtn" data-code="' + b.bag_code + '" style="white-space:nowrap;">🤝 נמסר ללקוח</button>' : '') +
+      noteButtonHtml(b) + '</div>');
   if (active) wireRowClicks('mineBody');
   document.querySelectorAll('#mineBody .directBtn').forEach(btn => btn.addEventListener('click', () => deliverDirect(btn.dataset.code)));
+  wireNoteButtons('mineBody', mineBags, loadMine);
 }
 document.getElementById('mineReload').onclick = loadMine;
 document.getElementById('mineSearch').addEventListener('input', renderMine);
@@ -668,7 +672,7 @@ const SUPPLIER_LOG_LABELS = {
   order_created: 'הזמנה נוצרה', bag_added: 'שקית נוספה', label_reprinted: 'מדבקה הודפסה שוב',
   report_received: '📋 נשלח דוח', delivered_direct: '🤝 נמסר ללקוח ישירות', released: 'מוכן — שוחרר מהתוכנה', picked_up: 'נאסף ע"י מיכאל', returned: 'הוחזר ממיכאל', customer_notified: 'עודכן ללקוח',
   customer_collected: 'נאסף ע"י לקוח', manual_fix: 'תיקון ידני (חנות)', print_failed: 'הדפסת מדבקה נכשלה',
-  supplier_update: '✏️ תיקון פרטים', customer_linked: 'דווח מספר לקוח', order_edited: 'ההזמנה נערכה בחנות',
+  supplier_note: '📝 הערה', supplier_update: '✏️ תיקון פרטים', customer_linked: 'דווח מספר לקוח', order_edited: 'ההזמנה נערכה בחנות',
 };
 const SUPPLIER_EDITABLE_ACTIONS = new Set(['picked_up', 'released', 'returned', 'delivered_direct']);
 function logWhenHtml(entry){
@@ -691,7 +695,7 @@ async function loadSupplierHistory(code, box){
       return '<div style="font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
         '<div><b>' + esc(label) + '</b> · ' + logWhenHtml(entry) +
         // בתיקון פרטים מציגים מה השתנה; בשאר הפעולות — רק השם והזמן
-        (entry.action === 'supplier_update' && entry.detail ? ' · ' + esc(entry.detail) : '') + '</div>' + del + '</div>';
+        ((entry.action === 'supplier_update' || entry.action === 'supplier_note') && entry.detail ? ' · ' + esc(entry.detail) : '') + '</div>' + del + '</div>';
     }).join('') || '<div style="color:var(--text-muted);font-size:12px;">אין היסטוריה לשקית ' + esc(code) + '</div>';
     box.querySelectorAll('.histDel').forEach(b => b.addEventListener('click', () => deleteSupplierHistoryRow(code, box, b.dataset)));
   } catch (err) {
@@ -748,7 +752,8 @@ function renderHistoryList(){
         (b.delivered_direct_note ? ' (' + esc(b.delivered_direct_note) + ')' : '')
       : b.status === 'returned'
       ? 'הוחזר' + (b.returned_at ? ' ' + new Date(b.returned_at).toLocaleDateString('he-IL') : '')
-      : 'אצלי' + (b.picked_up_at ? ' מאז ' + new Date(b.picked_up_at).toLocaleDateString('he-IL') : '')), false, true);
+      : 'אצלי' + (b.picked_up_at ? ' מאז ' + new Date(b.picked_up_at).toLocaleDateString('he-IL') : '')), false, true, noteButtonHtml);
+  wireNoteButtons('historyBody', historyBags, loadHistoryList);
   document.querySelectorAll('#historyBody .histBtn').forEach(btn => btn.addEventListener('click', () => {
     const box = document.getElementById('shist-' + btn.dataset.code);
     if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
@@ -818,6 +823,32 @@ async function deliverDirect(code){
     beep(220, 0.3);
   }
   loadMine();
+}
+// --- "📝 הערה" על שקית — החנות רואה אותה על השקית (למשל כשהיא חוזרת). ריק = מחיקת ההערה.
+function noteButtonHtml(b){
+  return '<button type="button" class="reload noteBtn" data-code="' + b.bag_code + '" style="white-space:nowrap;">📝 ' + (b.supplier_note ? 'ערוך הערה' : 'הערה') + '</button>';
+}
+function wireNoteButtons(containerId, bagsList, reload){
+  document.querySelectorAll('#' + containerId + ' .noteBtn').forEach(btn => btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const code = btn.dataset.code;
+    const bag = bagsList.find(x => x.bag_code === code);
+    const note = prompt('הערה על שקית ' + code + ' (החנות תראה אותה על השקית; ריק = מחיקה):', (bag && bag.supplier_note) || '');
+    if (note === null) return;
+    try {
+      const res = await fetch('/api/supplier/note', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bag_code: code, note }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'שגיאה');
+      if (data.changed) flashScan('ok', code, '', note.trim() ? '📝 ההערה נשמרה' : 'ההערה נמחקה', '');
+    } catch (err) {
+      flashScan('warn', code, '', err.message);
+    }
+    reload();
+  }));
 }
 </script>
 </body>

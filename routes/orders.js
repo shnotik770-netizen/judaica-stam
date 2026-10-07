@@ -241,7 +241,7 @@ router.get("/bags", asyncHandler(async (req, res) => {
 
   const { rows } = await pool.query(
     `select o.order_number, o.brought_by, c.first_name, c.last_name, c.phone,
-            b.bag_code, b.item_type, b.item_type_note, b.quantity, b.variant, b.mezuzah_cases, b.status,
+            b.bag_code, b.item_type, b.item_type_note, b.quantity, b.variant, b.mezuzah_cases, b.supplier_note, b.status,
             b.picked_up_at, b.imported_at, b.ready_at, b.returned_at, b.delivered_direct_at, b.delivered_direct_note, b.customer_notified_at, b.customer_collected_at, b.created_at,
             (select max(r.received_at) from bag_reports r where r.bag_id = b.id) as report_received_at,
             col.collection_number, col.started_at as collection_started_at
@@ -608,7 +608,7 @@ router.get("/:order_number", asyncHandler(async (req, res) => {
     return;
   }
   const bags = await pool.query(
-    `select bag_code, item_type, item_type_note, quantity, variant, mezuzah_cases, status, result, picked_up_at, returned_at, imported_at, ready_at,
+    `select bag_code, item_type, item_type_note, quantity, variant, mezuzah_cases, supplier_note, supplier_note_at, status, result, picked_up_at, returned_at, imported_at, ready_at,
             delivered_direct_at, delivered_direct_note,
             customer_notified_at, customer_collected_at,
             (select max(r.received_at) from bag_reports r where r.bag_id = bags.id) as report_received_at

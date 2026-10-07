@@ -3,7 +3,7 @@ import { pool } from "../lib/db.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import { logActivity, snapshotBagStates } from "../lib/activityLog.js";
 import { ITEM_TYPES, ITEM_TYPE_LABELS } from "../lib/itemTypes.js";
-import { VARIANT_FIELDS, cleanVariant, cleanMezuzahCases } from "../lib/variant.js";
+import { VARIANT_FIELDS, cleanVariant } from "../lib/variant.js";
 
 export const router = express.Router();
 // ללא אימות בכוונה — החלטת המשתמש: מיכאל אמור להיות מחובר תמיד בלי להזין מפתח כדי לעבוד.
@@ -50,6 +50,9 @@ function serializeBag(bag) {
     variant: bag.variant || null,
     // כמה בתי מזוזה הגיעו עם המזוזות (רק למזוזה; null = לא נשאל בקבלה)
     mezuzah_cases: bag.mezuzah_cases ?? null,
+    // הערה של הספק על השקית (null = אין)
+    supplier_note: bag.supplier_note || null,
+    supplier_note_at: bag.supplier_note_at || null,
     picked_up_at: bag.picked_up_at,
     imported_at: bag.imported_at,
     ready_at: bag.ready_at || null,
@@ -333,6 +336,32 @@ router.post("/deliver-direct", asyncHandler(async (req, res) => {
   res.json({ ok: true, bag: serializeBag(await loadBag(bag.bag_code)) });
 }));
 
+// הערה של הספק על השקית — מוצגת בחנות על השקית (ברשימה ובמסך העריכה), ונרשמת בהיסטוריה. גוף: {bag_code, note}.
+// note ריק מוחק את ההערה. כל שינוי נרשם (supplier_note) כדי שההיסטוריה תראה מה נכתב ומתי.
+router.post("/note", asyncHandler(async (req, res) => {
+  const { bag_code, note } = req.body || {};
+  if (!bag_code) {
+    res.status(400).json({ error: "bag_code נדרש" });
+    return;
+  }
+  const bag = await loadBag(String(bag_code));
+  if (!bag) {
+    res.status(404).json({ error: "קוד לא מוכר" });
+    return;
+  }
+  const clean = String(note ?? "").trim().slice(0, 1000) || null;
+  if (clean === (bag.supplier_note || null)) {
+    res.json({ ok: true, changed: false });
+    return;
+  }
+  await pool.query(
+    "update bags set supplier_note = $2, supplier_note_at = case when $2::text is null then null else now() end, updated_at = now() where id = $1",
+    [bag.id, clean]
+  );
+  logActivity(bag.bag_code, bag.order_number, "supplier_note", clean || "ההערה נמחקה");
+  res.json({ ok: true, changed: true });
+}));
+
 // תיקון פרטים מהספק — כשמיכאל מגלה שמשהו נרשם לא נכון בקבלה (כמות, סוג, פרטי פריט, או שם/טלפון/כתובת של הלקוח).
 // גוף: {bag_code, item_type?, quantity?, item_type_note?, variant?, customer?: {first_name?, last_name?, phone?, address?}}
 // או כמה בבת אחת {updates: [...]}. רק השדות שנשלחו נבדקים; ביומן נרשם רק מה שבאמת השתנה ("כמות: מ-6 ל-7").
@@ -348,6 +377,10 @@ async function applySupplierUpdate(item) {
   const bag = await loadBag(String(bag_code));
   if (!bag) return { bag_code, ok: false, error: "קוד לא מוכר" };
 
+  // מספר בתי המזוזה נרשם בחנות בקבלה — הספק לא מתקן אותו (החלטת המשתמש); אם יש פער, הוא כותב הערה (/note)
+  if (item.mezuzah_cases !== undefined) {
+    return { bag_code, ok: false, error: "את מספר בתי המזוזה אי אפשר לתקן מצד הספק — אפשר לכתוב הערה על השקית (POST /api/supplier/note)" };
+  }
   const bagSets = {};
   const changes = [];
   // סוג פריט
@@ -382,17 +415,6 @@ async function applySupplierUpdate(item) {
       }
     }
     if (JSON.stringify(before) !== JSON.stringify(after)) bagSets.variant = cleaned.variant ? JSON.stringify(cleaned.variant) : null;
-  }
-  // בתי מזוזה — נבדק מול הכמות והסוג אחרי התיקון (גם אם רק הכמות/הסוג השתנו)
-  if (item.mezuzah_cases !== undefined || bagSets.item_type || bagSets.quantity) {
-    const qty = bagSets.quantity ?? bag.quantity;
-    const wanted = item.mezuzah_cases !== undefined ? item.mezuzah_cases : bag.mezuzah_cases;
-    const cases = cleanMezuzahCases(itemType, wanted, qty);
-    if (cases.error) return { bag_code, ok: false, error: cases.error };
-    if (cases.value !== (bag.mezuzah_cases ?? null)) {
-      bagSets.mezuzah_cases = cases.value;
-      changes.push(`בתי מזוזה: מ-${shown(bag.mezuzah_cases)} ל-${shown(cases.value)}`);
-    }
   }
   // פרטי לקוח
   const customerSets = {};

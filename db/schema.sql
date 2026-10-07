@@ -153,3 +153,8 @@ alter table bags add constraint bags_status_check
 
 -- כמה בתי מזוזה הגיעו עם המזוזות (נשאל בקבלה; לא חובה). רק למזוזה, 0..quantity. null = לא נשאל.
 alter table bags add column if not exists mezuzah_cases int;
+
+-- הערה של הספק על השקית (POST /api/supplier/note) — למשל פער בכמות/בבתי מזוזה, או משהו שהחנות צריכה לדעת
+-- כשהשקית חוזרת. מוצגת בחנות על השקית. ריקה = אין הערה.
+alter table bags add column if not exists supplier_note text;
+alter table bags add column if not exists supplier_note_at timestamptz;
