@@ -175,6 +175,7 @@
   .pay-form{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
   .pay-form #payAdd{grid-column:1 / -1;}
   .pay-row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;background:var(--surface);border-radius:8px;padding:6px 10px;}
+  button.handoverBtn{background:var(--ok);color:#fff;border:none;border-radius:8px;padding:6px 10px;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;}
 </style>
 </head>
 <body>
@@ -200,12 +201,12 @@
   </div>
 
   <div class="tabs">
-    <div class="tab active" data-tab="new">הזמנה חדשה</div>
-    <div class="tab" data-tab="list">כל ההזמנות</div>
+    <div class="tab" data-tab="new">הזמנה חדשה</div>
+    <div class="tab active" data-tab="list">כל ההזמנות</div>
     <div class="tab" data-tab="admin">ניהול</div>
   </div>
 
-  <div id="newPanel">
+  <div id="newPanel" class="hidden">
   <div class="sub">כל שקית מודפסת מיד כמדבקה נפרדת עם ברקוד — אפשר להוסיף כמה שקיות שרוצים באותה הזמנה.</div>
 
   <form class="card" id="orderForm">
@@ -235,7 +236,7 @@
   </form>
   </div>
 
-  <div id="listPanel" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
+  <div id="listPanel" style="display:flex;flex-direction:column;gap:12px;">
     <div id="printFailuresBanner" class="hidden" style="font-size:13.5px;font-weight:600;color:#fff;background:var(--danger);border-radius:9px;padding:9px 12px;text-align:center;cursor:pointer;"></div>
     <div class="filters qa-hide">
       <select id="filterItemType">
@@ -727,9 +728,16 @@ async function loadList(){
       return '<div class="bag-row" data-order="' + b.order_number + '" data-code="' + b.bag_code + '" style="cursor:pointer;">' +
         '<div><div class="who">' + b.bag_code + ' · ' + esc(b.first_name) + ' ' + esc(b.last_name) + '</div>' +
         '<div class="sub">הזמנה #' + b.order_number + ' · ' + item + ' · נוצר ' + when + collectionInfo + noteInfo + broughtInfo + directInfo + reportInfo + paidInfo + supplierNoteInfo + '</div></div>' +
-        statusBadge(b) +
-        '</div>';
+        '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">' + statusBadge(b) +
+        // שקית שחזרה לחנות ועוד לא נמסרה ללקוח — מסירה ישירות מהרשימה, בלי להיכנס לפעולות מהירות
+        (!quickAction && b.status === 'returned' && !b.customer_collected_at
+          ? '<button type="button" class="handoverBtn" data-code="' + b.bag_code + '" data-phone="' + esc(b.phone) + '">📦 מסירה ללקוח</button>' : '') +
+        '</div></div>';
     }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:20px;">אין שקיות תואמות</div>';
+    listEl.querySelectorAll('.handoverBtn').forEach(btn => btn.addEventListener('click', (e) => {
+      e.stopPropagation(); // לא לפתוח את מסך העריכה
+      handoverFromList(btn.dataset.code, btn.dataset.phone);
+    }));
     listEl.querySelectorAll('.bag-row').forEach(row => {
       row.addEventListener('click', () => {
         if (quickAction) applyQuickAction([row.dataset.code]);
@@ -1664,6 +1672,50 @@ document.getElementById('payAdd').addEventListener('click', async () => {
     openEdit(editOrderNumber);
   } catch (err) { alert(err.message); }
 });
+// --- "📦 מסירה ללקוח" ישירות מרשימת "כל ההזמנות". אם ללקוח (אותו טלפון) יש עוד שקיות שחזרו ועוד לא נמסרו —
+// שואלים אם נמסרו כולן, עם פירוט; אישור = כולן, ביטול = רק השקית שנלחצה.
+async function handoverFromList(code, phone){
+  let codes = [code];
+  try {
+    const res = await fetch(API_BASE + '/api/orders/bags?status=not_collected&q=' + encodeURIComponent(phone));
+    const data = await res.json();
+    const others = (data.bags || []).filter(b => b.phone === phone && b.bag_code !== code);
+    if (others.length) {
+      const list = others.map(b => '• ' + b.bag_code + ' — ' + itemText(b.item_type, b.quantity) +
+        (b.variant || b.mezuzah_cases != null ? ' (' + [variantText(b.variant), b.mezuzah_cases != null ? b.mezuzah_cases + ' בתי מזוזה' : ''].filter(Boolean).join(' · ') + ')' : '') +
+        ' · הזמנה #' + b.order_number).join('\n');
+      const all = confirm('ללקוח יש עוד ' + (others.length === 1 ? 'שקית אחת שחזרה ועוד לא נמסרה' : others.length + ' שקיות שחזרו ועוד לא נמסרו') + ':\n' + list +
+        '\n\nהאם נמסרו כל השקיות?\nאישור = כל השקיות · ביטול = רק שקית ' + code);
+      if (all) codes = [code, ...others.map(b => b.bag_code)];
+    }
+  } catch (e) { /* אם הבדיקה נכשלה — ממשיכים עם השקית הזו בלבד */ }
+  try {
+    const res = await fetch(API_BASE + '/api/orders/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bag_codes: codes, action: 'collect' }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה');
+    const ok = (data.results || []).filter(r => r.ok && r.action === 'collected');
+    const failed = (data.results || []).filter(r => !r.ok);
+    if (failed.length) {
+      flashScan('warn', failed.map(r => r.bag_code).join(', '), '', failed[0].error || 'שגיאה');
+      beepError();
+    } else if (ok.length) {
+      const r = ok[0];
+      flashScan('ok', ok.map(x => x.bag_code).join(', '), ok.length > 1 ? ok.length + ' שקיות' : itemText(r.item_type, r.quantity),
+        '✓ נמסר ללקוח', r.customer.first_name + ' ' + r.customer.last_name);
+      beepOk();
+    }
+  } catch (err) {
+    flashScan('warn', code, '', err.message);
+    beepError();
+  }
+  loadList(); loadSummary();
+}
+// ברירת מחדל בפתיחת הדף: "כל ההזמנות"
+loadList(); loadSummary();
 </script>
 </body>
 </html>
