@@ -173,7 +173,6 @@
   .supplier-note{background:var(--accent-soft);color:var(--text);border-right:3px solid var(--accent);border-radius:8px;padding:8px 10px;font-size:13px;}
   .payments-box{border:1px solid var(--border);border-radius:11px;padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--surface-2);}
   .pay-form{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
-  .pay-form #payNote{grid-column:1 / -1;}
   .pay-form #payAdd{grid-column:1 / -1;}
   .pay-row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;background:var(--surface);border-radius:8px;padding:6px 10px;}
 </style>
@@ -329,15 +328,6 @@
       <div id="editPayments" style="display:flex;flex-direction:column;gap:5px;"></div>
       <div class="pay-form">
         <input id="payAmount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="סכום ₪">
-        <select id="payMethod">
-          <option value="מזומן">מזומן</option>
-          <option value="אשראי">אשראי</option>
-          <option value="העברה בנקאית">העברה בנקאית</option>
-          <option value="ביט">ביט</option>
-          <option value="פייבוקס">פייבוקס</option>
-          <option value="צ'ק">צ'ק</option>
-          <option value="אחר">אחר</option>
-        </select>
         <input id="payNote" placeholder="הערה (לא חובה)">
         <button type="button" class="btn-primary" id="payAdd">הוסף תשלום</button>
       </div>
@@ -1620,7 +1610,7 @@ document.getElementById('payAdd').addEventListener('click', async () => {
     const res = await fetch(API_BASE + '/api/orders/' + encodeURIComponent(editOrderNumber) + '/payments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: +amount, method: document.getElementById('payMethod').value, note: document.getElementById('payNote').value }),
+      body: JSON.stringify({ amount: +amount, note: document.getElementById('payNote').value }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'שגיאה');
