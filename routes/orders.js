@@ -6,7 +6,7 @@ import { toHebrewDate } from "../lib/hebrewDate.js";
 import { sendSms } from "../lib/call2all.js";
 import { logActivity, snapshotBagStates, BAG_STATE_FIELDS } from "../lib/activityLog.js";
 import { getSetting, setSetting } from "../lib/settings.js";
-import { cleanVariant, variantText, cleanMezuzahCases } from "../lib/variant.js";
+import { cleanVariant, variantText, cleanMezuzahCases, VARIANT_FIELDS } from "../lib/variant.js";
 import { ITEM_TYPES, ITEM_TYPE_LABELS } from "../lib/itemTypes.js";
 
 export const router = express.Router();
@@ -40,15 +40,56 @@ function summarizeItems(bags) {
 const makeBagCode = (orderNumber, bagIndex) => `${orderNumber}${String(bagIndex).padStart(2, "0")}`;
 
 // מדפיס מדבקה לשקית אחת — מספר שקית, שם, טלפון, תאריך (עברי), סוג הפריט.
-function printBagLabel(order_number, customer, bag) {
+// תיאור שינויים לקריא ("כמות: מ-6 ל-7") — ליומן כשהחנות עורכת הזמנה (bag_edited / order_edited)
+const shownValue = (v) => (v == null || v === "" ? "לא צוין" : String(v));
+const CUSTOMER_LABELS = { first_name: "שם פרטי", last_name: "שם משפחה", phone: "טלפון", address: "כתובת" };
+function describeCustomerChanges(before, after) {
+  return Object.keys(CUSTOMER_LABELS)
+    .filter((k) => (before[k] || "") !== (after[k] || ""))
+    .map((k) => `${CUSTOMER_LABELS[k]}: מ-${shownValue(before[k])} ל-${shownValue(after[k])}`);
+}
+function describeBagChanges(before, after) {
+  const changes = [];
+  if (before.item_type !== after.item_type) {
+    changes.push(`סוג פריט: מ-${ITEM_TYPE_LABELS[before.item_type]} ל-${ITEM_TYPE_LABELS[after.item_type]}`);
+  }
+  if (before.quantity !== after.quantity) changes.push(`כמות: מ-${before.quantity} ל-${after.quantity}`);
+  if ((before.item_type_note || null) !== (after.item_type_note || null)) {
+    changes.push(`הערה: מ-${shownValue(before.item_type_note)} ל-${shownValue(after.item_type_note)}`);
+  }
+  const bv = before.variant || {}, av = after.variant || {};
+  for (const key of new Set([...Object.keys(bv), ...Object.keys(av)])) {
+    if (bv[key] !== av[key]) {
+      const label = (v) => (v == null ? "לא צוין" : VARIANT_FIELDS[key]?.options[v] || v);
+      changes.push(`${VARIANT_FIELDS[key]?.label || key}: מ-${label(bv[key])} ל-${label(av[key])}`);
+    }
+  }
+  if ((before.mezuzah_cases ?? null) !== (after.mezuzah_cases ?? null)) {
+    changes.push(`בתי מזוזה: מ-${shownValue(before.mezuzah_cases)} ל-${shownValue(after.mezuzah_cases)}`);
+  }
+  return changes;
+}
+
+// שורת הפריט על המדבקה: "3 מזוזות (פתוחות · 2 בתים)" / "תפילין זוג (ר"ת · פשוטים)"
+const LABEL_SHORT_VALUES = { rolled: "סגורות", open: "פתוחות" };
+function labelItemText(bag) {
+  const base = bag.quantity > 1
+    ? `${bag.quantity} ${ITEM_TYPE_PLURALS[bag.item_type] || ITEM_TYPE_LABELS[bag.item_type] || bag.item_type}`
+    : ITEM_TYPE_LABELS[bag.item_type] || bag.item_type;
+  const details = Object.entries(bag.variant || {})
+    .map(([k, v]) => LABEL_SHORT_VALUES[v] || VARIANT_FIELDS[k]?.options[v] || v);
+  if (bag.mezuzah_cases != null) details.push(bag.mezuzah_cases === 1 ? "בית אחד" : `${bag.mezuzah_cases} בתים`);
+  return details.length ? `${base} (${details.join(" · ")})` : base;
+}
+
+// orderDate — תאריך ההזמנה (בהדפסה חוזרת: התאריך המקורי, לא היום). כל הנתונים נקראים מהמסד ברגע ההדפסה,
+// כך שהדפסה חוזרת אחרי תיקון מדפיסה את הפרטים המעודכנים.
+function printBagLabel(order_number, customer, bag, orderDate) {
   const text = [
     `הזמנה ${order_number} | שקית ${bag.bag_code}`,
-    `${customer.first_name} ${customer.last_name}`,
-    customer.phone,
-    toHebrewDate(new Date()),
-    `${ITEM_TYPE_LABELS[bag.item_type] || bag.item_type}${bag.quantity > 1 ? ` ×${bag.quantity}` : ""}` +
-      (bag.variant ? ` · ${variantText(bag.variant)}` : "") +
-      (bag.mezuzah_cases != null ? ` · ${bag.mezuzah_cases} בתי מזוזה` : ""),
+    `${customer.first_name} ${customer.last_name} · ${customer.phone}`,
+    toHebrewDate(orderDate || new Date()),
+    labelItemText(bag),
   ].join("\n");
   enqueuePrint({ text, barcode: bag.bag_code, copies: 1 }).catch((e) => {
     console.error("enqueuePrint failed", bag.bag_code, e.message);
@@ -516,8 +557,12 @@ router.get("/activity-log", asyncHandler(async (req, res) => {
   // היסטוריית שקית — בלי רשומות "שורה נמחקה" (הן מופיעות רק ביומן הכללי, כדי לא להעמיס על ההיסטוריה)
   if (bagCode) {
     const { rows } = await pool.query(
+      // כולל אירועים ברמת ההזמנה של השקית (נוצרה / נערכו פרטי לקוח) — הם נרשמים בלי bag_code
       `select id, bag_code, order_number, action, detail, created_at from activity_log
-       where bag_code = $1 and action <> 'log_entry_deleted' order by created_at desc limit $2`,
+       where action <> 'log_entry_deleted'
+         and (bag_code = $1 or (bag_code is null and action in ('order_created', 'order_edited') and order_number =
+              (select o.order_number from bags b join orders o on o.id = b.order_id where b.bag_code = $1)))
+       order by created_at desc limit $2`,
       [bagCode, limit]
     );
     res.json({ log: withHebrewDates(rows) });
@@ -629,28 +674,23 @@ router.put("/:order_number", asyncHandler(async (req, res) => {
     return;
   }
   const o = await pool.query(
-    "select id, customer_id from orders where order_number = $1",
+    `select o.id, o.customer_id, o.brought_by, c.first_name, c.last_name, c.phone, c.address
+     from orders o join customers c on c.id = o.customer_id where o.order_number = $1`,
     [req.params.order_number]
   );
   if (o.rows.length === 0) {
     res.status(404).json({ error: "הזמנה לא נמצאה" });
     return;
   }
-  const { id: orderId, customer_id: customerId } = o.rows[0];
+  const before = o.rows[0];
+  const { id: orderId, customer_id: customerId } = before;
   if (await isOrderLocked(orderId)) {
     res.status(409).json({ error: "ההזמנה כבר נכנסה למערכת הספק ולא ניתנת לעריכה" });
     return;
   }
 
-  if ("brought_by" in (req.body || {})) {
-    await pool.query("update orders set brought_by = $1, updated_at = now() where id = $2",
-      [String(req.body.brought_by || "").trim().slice(0, 200) || null, orderId]);
-  }
-  await pool.query(
-    "update customers set first_name=$1, last_name=$2, phone=$3, address=$4 where id=$5",
-    [customer.first_name, customer.last_name, customer.phone, (customer.address || "").trim(), customerId]
-  );
-
+  // בדיקה של כל השקיות לפני ששומרים משהו — שלא תישאר הזמנה חצי-מעודכנת אם שקית אחת לא תקינה
+  const cleanedBags = [];
   for (const b of bags || []) {
     if (!ITEM_TYPES.includes(b.item_type)) {
       res.status(400).json({ error: `item_type לא תקין: ${b.item_type}` });
@@ -666,14 +706,52 @@ router.put("/:order_number", asyncHandler(async (req, res) => {
       res.status(400).json({ error: cases.error });
       return;
     }
-    await pool.query(
-      "update bags set item_type=$1, item_type_note=$2, quantity=$3, variant=$4, mezuzah_cases=$5, updated_at=now() where bag_code=$6 and order_id=$7",
-      [b.item_type, b.item_type_note || null, b.quantity || 1, v.variant ? JSON.stringify(v.variant) : null, cases.value, b.bag_code, orderId]
-    );
+    cleanedBags.push({
+      bag_code: b.bag_code, item_type: b.item_type, item_type_note: b.item_type_note || null,
+      quantity: b.quantity || 1, variant: v.variant, mezuzah_cases: cases.value,
+    });
+  }
+  const { rows: oldBags } = await pool.query(
+    "select bag_code, item_type, item_type_note, quantity, variant, mezuzah_cases from bags where order_id = $1",
+    [orderId]
+  );
+  const oldByCode = new Map(oldBags.map((b) => [b.bag_code, b]));
+
+  // שינויים ברמת ההזמנה (לקוח + "הובא ע\"י") — נרשמים פעם אחת להזמנה, ומוצגים בהיסטוריה של כל שקית שלה
+  const newCustomer = {
+    first_name: customer.first_name, last_name: customer.last_name, phone: customer.phone,
+    address: (customer.address || "").trim(),
+  };
+  const orderChanges = describeCustomerChanges(before, newCustomer);
+  let broughtBy = before.brought_by;
+  if ("brought_by" in (req.body || {})) {
+    broughtBy = String(req.body.brought_by || "").trim().slice(0, 200) || null;
+    if (broughtBy !== (before.brought_by || null)) {
+      orderChanges.push(`הובא ע"י: מ-${shownValue(before.brought_by)} ל-${shownValue(broughtBy)}`);
+    }
   }
 
-  logActivity(null, req.params.order_number, "order_edited", null);
-  res.json({ ok: true });
+  await pool.query("update orders set brought_by = $1, updated_at = now() where id = $2", [broughtBy, orderId]);
+  await pool.query(
+    "update customers set first_name=$1, last_name=$2, phone=$3, address=$4 where id=$5",
+    [newCustomer.first_name, newCustomer.last_name, newCustomer.phone, newCustomer.address, customerId]
+  );
+  const bagChanges = [];
+  for (const b of cleanedBags) {
+    const old = oldByCode.get(b.bag_code);
+    if (!old) continue;
+    await pool.query(
+      "update bags set item_type=$1, item_type_note=$2, quantity=$3, variant=$4, mezuzah_cases=$5, updated_at=now() where bag_code=$6 and order_id=$7",
+      [b.item_type, b.item_type_note, b.quantity, b.variant ? JSON.stringify(b.variant) : null, b.mezuzah_cases, b.bag_code, orderId]
+    );
+    const changes = describeBagChanges(old, b);
+    if (changes.length) bagChanges.push({ bag_code: b.bag_code, changes });
+  }
+
+  // ביומן: רק מה שבאמת השתנה ("כמות: מ-6 ל-7"). שמירה בלי שינוי — לא נרשמת.
+  if (orderChanges.length) logActivity(null, req.params.order_number, "order_edited", orderChanges.join(" · "));
+  for (const bc of bagChanges) logActivity(bc.bag_code, req.params.order_number, "bag_edited", bc.changes.join(" · "));
+  res.json({ ok: true, order_changes: orderChanges, bag_changes: bagChanges });
 }));
 
 // הוספת שקית חדשה להזמנה קיימת (ומדפיסה לה מדבקה מיד, כמו ביצירת הזמנה) — רק כל עוד ההזמנה לא נעולה.
@@ -808,7 +886,8 @@ router.put("/bags/:bag_code/force-status", asyncHandler(async (req, res) => {
 // עדיין), או שהמדבקה הפיזית אבדה/נקרעה. מותר גם על הזמנה נעולה — לא משנה שום מצב, רק מדפיס שוב.
 router.post("/bags/:bag_code/reprint", asyncHandler(async (req, res) => {
   const { rows } = await pool.query(
-    `select b.bag_code, b.item_type, b.quantity, b.variant, b.mezuzah_cases, o.order_number, c.first_name, c.last_name, c.phone
+    `select b.bag_code, b.item_type, b.quantity, b.variant, b.mezuzah_cases, o.order_number, o.created_at as order_created_at,
+            c.first_name, c.last_name, c.phone
      from bags b join orders o on o.id = b.order_id join customers c on c.id = o.customer_id
      where b.bag_code = $1`,
     [req.params.bag_code]
@@ -818,7 +897,7 @@ router.post("/bags/:bag_code/reprint", asyncHandler(async (req, res) => {
     return;
   }
   const bag = rows[0];
-  printBagLabel(bag.order_number, bag, bag);
+  printBagLabel(bag.order_number, bag, bag, bag.order_created_at);
   logActivity(bag.bag_code, bag.order_number, "label_reprinted", null);
   res.json({ ok: true });
 }));

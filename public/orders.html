@@ -1352,13 +1352,13 @@ document.getElementById('smsTemplateSave').addEventListener('click', async () =>
 });
 
 const LOG_ACTION_LABELS = {
-  order_created: 'הזמנה נוצרה', order_edited: 'הזמנה נערכה', order_deleted: 'הזמנה נמחקה',
+  order_created: 'הזמנה נוצרה', order_edited: '✏️ פרטי ההזמנה שונו בחנות', order_deleted: 'הזמנה נמחקה',
   bag_added: 'שקית נוספה', bag_deleted: 'שקית נמחקה', label_reprinted: 'מדבקה הודפסה שוב',
   picked_up: 'נאסף ע"י מיכאל', released: 'מוכן אצל מיכאל (שוחרר מהתוכנה)', returned: 'הוחזר ממיכאל',
   customer_notified: 'עודכן ללקוח', customer_collected: 'נאסף ע"י לקוח',
   customer_linked: 'מיכאל דיווח מספר לקוח', manual_fix: 'תיקון ידני', settings_changed: 'הגדרה עודכנה',
   report_received: '📋 התקבל דוח ממיכאל', print_failed: '⚠️ הדפסת מדבקה נכשלה', sms_failed: '⚠️ SMS ללקוח לא נשלח',
-  supplier_update: '✏️ מיכאל תיקן פרטים', supplier_note: '💬 הערה ממיכאל', delivered_direct: '🤝 נמסר ללקוח ע"י מיכאל (לא דרך החנות)',
+  supplier_update: '✏️ מיכאל תיקן פרטים', supplier_note: '💬 הערה ממיכאל', bag_edited: '✏️ שונה בחנות', delivered_direct: '🤝 נמסר ללקוח ע"י מיכאל (לא דרך החנות)',
 };
 const LOG_ERROR_ACTIONS = new Set(['print_failed', 'sms_failed']);
 // בפעולות האלה הפירוט הטכני לא מעניין (הדוח עצמו בכפתור "דוח ממיכאל") — מציגים רק את שם הפעולה והזמן.

@@ -672,7 +672,7 @@ const SUPPLIER_LOG_LABELS = {
   order_created: 'הזמנה נוצרה', bag_added: 'שקית נוספה', label_reprinted: 'מדבקה הודפסה שוב',
   report_received: '📋 נשלח דוח', delivered_direct: '🤝 נמסר ללקוח ישירות', released: 'מוכן — שוחרר מהתוכנה', picked_up: 'נאסף ע"י מיכאל', returned: 'הוחזר ממיכאל', customer_notified: 'עודכן ללקוח',
   customer_collected: 'נאסף ע"י לקוח', manual_fix: 'תיקון ידני (חנות)', print_failed: 'הדפסת מדבקה נכשלה',
-  supplier_note: '📝 הערה', supplier_update: '✏️ תיקון פרטים', customer_linked: 'דווח מספר לקוח', order_edited: 'ההזמנה נערכה בחנות',
+  supplier_note: '📝 הערה', supplier_update: '✏️ תיקון פרטים', customer_linked: 'דווח מספר לקוח', order_edited: 'ההזמנה נערכה בחנות', bag_edited: 'השקית נערכה בחנות',
 };
 const SUPPLIER_EDITABLE_ACTIONS = new Set(['picked_up', 'released', 'returned', 'delivered_direct']);
 function logWhenHtml(entry){
@@ -695,7 +695,7 @@ async function loadSupplierHistory(code, box){
       return '<div style="font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
         '<div><b>' + esc(label) + '</b> · ' + logWhenHtml(entry) +
         // בתיקון פרטים מציגים מה השתנה; בשאר הפעולות — רק השם והזמן
-        ((entry.action === 'supplier_update' || entry.action === 'supplier_note') && entry.detail ? ' · ' + esc(entry.detail) : '') + '</div>' + del + '</div>';
+        (['supplier_update', 'supplier_note', 'bag_edited', 'order_edited'].includes(entry.action) && entry.detail ? ' · ' + esc(entry.detail) : '') + '</div>' + del + '</div>';
     }).join('') || '<div style="color:var(--text-muted);font-size:12px;">אין היסטוריה לשקית ' + esc(code) + '</div>';
     box.querySelectorAll('.histDel').forEach(b => b.addEventListener('click', () => deleteSupplierHistoryRow(code, box, b.dataset)));
   } catch (err) {
