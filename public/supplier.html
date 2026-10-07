@@ -240,6 +240,7 @@ function flashScan(kind, code, item, actionText, who){
     document.body.appendChild(el);
   }
   el.classList.toggle('warn', kind !== 'ok');
+  if (kind !== 'ok') scanHadError = true;
   el.innerHTML = '<span class="code">' + esc(code || '') + '</span>' +
     [item, actionText, who].filter(Boolean).map(t => ' · ' + esc(t)).join('');
   el.classList.add('show');
@@ -262,18 +263,25 @@ function setQuickModeTheme(type, title, hint){
   banner.querySelector('small').textContent = hint || '';
   banner.classList.remove('hidden');
 }
-function beep(freq, dur){
+function beep(freq, dur, delay){
   try{
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
+    const start = ctx.currentTime + (delay || 0);
     osc.frequency.value = freq;
     osc.connect(gain); gain.connect(ctx.destination);
-    gain.gain.setValueAtTime(0.2, ctx.currentTime);
-    osc.start();
-    osc.stop(ctx.currentTime + dur);
+    gain.gain.setValueAtTime(0.2, start);
+    osc.start(start);
+    osc.stop(start + dur);
   }catch(e){}
 }
+// צליל הצלחה: צפצוף גבוה וקצר. צליל שגיאה (קוד לא מוכר / לא ברשימה / כבר סומן וכו'): שני צפצופים נמוכים וארוכים —
+// כדי שאפשר לדעת בלי להסתכל על המסך. אחרי סריקה, אם הופיעה שורה אדומה (flashScan 'warn') — צליל שגיאה.
+function beepOk(){ beep(880, 0.15); }
+function beepError(){ beep(300, 0.2); beep(200, 0.35, 0.25); }
+let scanHadError = false;
+function scanResultBeep(){ if (scanHadError) beepError(); else beepOk(); scanHadError = false; }
 
 // מונה את המצלמות הזמינות (פעם אחת, מבקש הרשאה אם צריך) ובוחר כברירת מחדל את האחורית —
 // לפי label אם יש ("back"/"rear"/"environment"), אחרת מצלמה אחרונה ברשימה (נפוץ שזו האחורית).
@@ -539,6 +547,7 @@ function addQuickLog(kind, title, detail){
 
 async function applyQuickAction(bag_codes, force){
   if (!quickAction) return;
+  scanHadError = false;
   try {
     const res = await fetch('/api/supplier/bulk-scan', {
       method: 'POST',
@@ -549,7 +558,7 @@ async function applyQuickAction(bag_codes, force){
     if (!res.ok) {
       bag_codes.forEach(c => addQuickLog('warn', c, data.error || 'שגיאה'));
       flashScan('warn', bag_codes.join(', '), '', data.error || 'שגיאה');
-      beep(220, 0.3);
+      beepError();
     } else {
       const unconfirmed = [];
       (data.results || []).forEach(r => {
@@ -569,10 +578,11 @@ async function applyQuickAction(bag_codes, force){
         unconfirmed.forEach(c => addQuickLog('warn', c, 'לא נמסרה — לא דווחה כנבדקה'));
         flashScan('warn', unconfirmed.join(', '), '', 'לא נמסר — לא דווח כנבדק');
       }
-      beep(880, 0.15);
+      scanResultBeep();
     }
   } catch (err) {
     bag_codes.forEach(c => addQuickLog('err', c, 'שגיאת רשת: ' + err.message));
+    beepError();
   }
   if (quickAction.mount === 'pending') loadPending(); else loadMine();
 }
@@ -822,10 +832,10 @@ async function deliverDirect(code){
     if (!res.ok) throw new Error(data.error || 'שגיאה');
     const who = data.bag.customer.first_name + ' ' + data.bag.customer.last_name;
     flashScan('ok', code, itemText(data.bag.item_type, data.bag.quantity), '🤝 נמסר ללקוח ישירות', who);
-    beep(880, 0.15);
+    beepOk();
   } catch (err) {
     flashScan('warn', code, '', err.message);
-    beep(220, 0.3);
+    beepError();
   }
   loadMine();
 }
