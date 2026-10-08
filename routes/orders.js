@@ -87,7 +87,7 @@ function labelItemText(bag) {
 function printBagLabel(order_number, customer, bag, orderDate) {
   const text = [
     `הזמנה ${order_number} | שקית ${bag.bag_code}`,
-    `${customer.first_name} ${customer.last_name} · ${customer.phone}`,
+    `${[customer.first_name, customer.last_name].filter(Boolean).join(" ")} · ${customer.phone}`,
     toHebrewDate(orderDate || new Date()),
     labelItemText(bag),
   ].join("\n");
@@ -113,8 +113,10 @@ async function isOrderLocked(orderId) {
 // (אם כבר קיים לקוח עם אותו טלפון, מעדכנים את הפרטים שלו ומשתמשים באותו רשומה; אחרת יוצרים חדש).
 router.post("/", asyncHandler(async (req, res) => {
   const { customer, bags } = req.body || {};
-  if (!customer?.phone || !customer?.first_name || !customer?.last_name || !Array.isArray(bags) || bags.length === 0) {
-    res.status(400).json({ error: "customer (first_name, last_name, phone) ו-bags נדרשים" });
+  // שם: חובה פרטי *או* משפחה (לא חייבים את שניהם)
+  if (customer) { customer.first_name = String(customer.first_name || "").trim(); customer.last_name = String(customer.last_name || "").trim(); }
+  if (!customer?.phone || (!customer.first_name && !customer.last_name) || !Array.isArray(bags) || bags.length === 0) {
+    res.status(400).json({ error: "טלפון, שם (פרטי או משפחה) ולפחות שקית אחת נדרשים" });
     return;
   }
   for (const b of bags) {
@@ -355,8 +357,32 @@ async function findReturnedGroup(phone, { onlyUnnotified }) {
 // שקיות בבת אחת (bag_codes) — לסריקה רציפה או ללחיצה מרשימה. `force:true` מדווח/שולח שוב
 // במתכוון גם על שקית שכבר עודכנה (ה-UI מציג אזהרה ומבקש אישור מפורש לפני שליחת force) — כל
 // פעם (כולל חוזרות) נרשמת ביומן הפעולות, כך שההיסטוריה המלאה של כל הדיווחים על שקית נשמרת.
+// תצוגה מקדימה של הודעת העדכון ללקוח (לפי התבנית + קיבוץ שקיות אותו טלפון) — לחלון "הודעה אישית"
+router.get("/sms-preview", asyncHandler(async (req, res) => {
+  const bag = await loadBagForScan(String(req.query.bag_code || ""));
+  if (!bag) {
+    res.status(404).json({ error: "קוד לא מוכר" });
+    return;
+  }
+  if (bag.status !== "returned") {
+    res.status(409).json({ error: "השקית עדיין לא חזרה מהספק" });
+    return;
+  }
+  const group = await findReturnedGroup(bag.phone, { onlyUnnotified: !bag.customer_notified_at });
+  const template = await getSetting("sms_notify_template", DEFAULT_SMS_TEMPLATE);
+  res.json({
+    bag_code: bag.bag_code, phone: bag.phone,
+    customer: { first_name: bag.first_name, last_name: bag.last_name },
+    already_notified_at: bag.customer_notified_at,
+    grouped_bag_codes: group.map((g) => g.bag_code),
+    message: template.replace("{items}", summarizeItems(group.length ? group : [bag])),
+  });
+}));
+
 router.post("/scan", asyncHandler(async (req, res) => {
   const { bag_codes, action, force } = req.body || {};
+  // הודעה אישית (מצב "✓ הודעה אישית" בפעולה מהירה) — במקום התבנית; ב-notify_manual רק מוחזרת (לוואטסאפ)
+  const customMessage = String(req.body?.custom_message || "").trim().slice(0, 1000) || null;
   if (!Array.isArray(bag_codes) || bag_codes.length === 0) {
     res.status(400).json({ error: "bag_codes נדרש" });
     return;
@@ -392,9 +418,9 @@ router.post("/scan", asyncHandler(async (req, res) => {
 
       const isRepeat = Boolean(bag.customer_notified_at);
       const group = await findReturnedGroup(bag.phone, { onlyUnnotified: !force });
+      // נוסח ההודעה — אישית אם נשלחה, אחרת לפי התבנית. מוחזר גם בתשובה (לכפתור "שלח גם בוואטסאפ")
+      const message = customMessage || (await getSetting("sms_notify_template", DEFAULT_SMS_TEMPLATE)).replace("{items}", summarizeItems(group));
       if (action === "notify_sms") {
-        const template = await getSetting("sms_notify_template", DEFAULT_SMS_TEMPLATE);
-        const message = template.replace("{items}", summarizeItems(group));
         try {
           await sendSms(bag.phone, message);
         } catch (e) {
@@ -417,11 +443,11 @@ router.post("/scan", asyncHandler(async (req, res) => {
       const groupNote = group.length > 1 ? ` · קובצו ${group.length} שקיות של אותו טלפון` : "";
       const repeatNote = isRepeat ? " · דיווח חוזר" : "";
       for (const g of group) {
-        logActivity(g.bag_code, g.order_number, "customer_notified", (action === "notify_sms" ? "SMS" : "ידני") + groupNote + repeatNote, prevStates.get(g.bag_code));
+        logActivity(g.bag_code, g.order_number, "customer_notified", (action === "notify_sms" ? "SMS" : "ידני") + (customMessage ? " · הודעה אישית" : "") + groupNote + repeatNote, prevStates.get(g.bag_code));
       }
       results.push({
         bag_code: code, ok: true, action: "notified", order_number: bag.order_number, item_type: bag.item_type, quantity: bag.quantity, customer,
-        grouped_bag_codes: group.map((g) => g.bag_code), repeat: isRepeat,
+        grouped_bag_codes: group.map((g) => g.bag_code), repeat: isRepeat, message, phone: bag.phone,
       });
       continue;
     }
@@ -694,8 +720,9 @@ router.get("/:order_number", asyncHandler(async (req, res) => {
 // רק כל עוד ההזמנה לא נעולה (ראו isOrderLocked למעלה).
 router.put("/:order_number", asyncHandler(async (req, res) => {
   const { customer, bags } = req.body || {};
-  if (!customer?.phone || !customer?.first_name || !customer?.last_name) {
-    res.status(400).json({ error: "customer (first_name, last_name, phone) נדרש" });
+  if (customer) { customer.first_name = String(customer.first_name || "").trim(); customer.last_name = String(customer.last_name || "").trim(); }
+  if (!customer?.phone || (!customer.first_name && !customer.last_name)) {
+    res.status(400).json({ error: "טלפון ושם (פרטי או משפחה) נדרשים" });
     return;
   }
   const o = await pool.query(

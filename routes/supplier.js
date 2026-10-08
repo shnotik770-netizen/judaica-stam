@@ -422,7 +422,7 @@ async function applySupplierUpdate(item) {
     for (const key of Object.keys(CUSTOMER_FIELD_LABELS)) {
       if (customer[key] === undefined) continue;
       const value = String(customer[key] ?? "").trim();
-      if (!value && key !== "address") return { bag_code, ok: false, error: `${key} לא יכול להיות ריק` };
+      if (!value && key === "phone") return { bag_code, ok: false, error: "phone לא יכול להיות ריק" };
       if (value !== (bag[key] || "")) {
         customerSets[key] = value;
         changes.push(`${CUSTOMER_FIELD_LABELS[key]}: מ-${shown(bag[key])} ל-${shown(value)}`);
@@ -430,6 +430,12 @@ async function applySupplierUpdate(item) {
     }
   }
 
+  // שם: חובה פרטי או משפחה — לא יכולים להתרוקן שניהם
+  const finalFirst = customerSets.first_name ?? bag.first_name ?? "";
+  const finalLast = customerSets.last_name ?? bag.last_name ?? "";
+  if (!String(finalFirst).trim() && !String(finalLast).trim()) {
+    return { bag_code, ok: false, error: "צריך לפחות שם פרטי או שם משפחה" };
+  }
   if (changes.length === 0) return { bag_code: bag.bag_code, ok: true, changes: [] };
   const client = await pool.connect();
   try {

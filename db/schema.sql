@@ -169,3 +169,12 @@ create table if not exists order_payments (
   created_at timestamptz not null default now()
 );
 create index if not exists idx_order_payments_order on order_payments(order_id);
+
+-- מעקב "נקרא" בדף ה-SMS: לכל טלפון (מנורמל, 05...) — זמן ההודעה הנכנסת האחרונה שנקראה, כפי ש-Call2All מחזירה
+-- אותו (טקסט). נכנסות שזמנן אחרי זה = לא נקראו. שומרים את הזמן של Call2All עצמו ולא now(), כדי לא להיות תלויים
+-- באזור הזמן של השרת מול הפורמט שלהם.
+create table if not exists sms_reads (
+  phone text primary key,
+  last_read_in text not null,
+  updated_at timestamptz not null default now()
+);
