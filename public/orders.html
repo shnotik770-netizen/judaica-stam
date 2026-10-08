@@ -209,13 +209,13 @@
   <div id="newPanel" class="hidden">
   <div class="sub">כל שקית מודפסת מיד כמדבקה נפרדת עם ברקוד — אפשר להוסיף כמה שקיות שרוצים באותה הזמנה.</div>
 
-  <form class="card" id="orderForm">
+  <form class="card" id="orderForm" autocomplete="off">
     <div class="grid2">
       <div class="field"><label>שם פרטי</label><input required id="firstName"></div>
       <div class="field"><label>שם משפחה</label><input required id="lastName"></div>
     </div>
     <div class="grid2">
-      <div class="field"><label>טלפון</label><input required id="phone" type="tel" inputmode="numeric" autocomplete="tel"></div>
+      <div class="field"><label>טלפון</label><input required id="phone" type="tel" inputmode="numeric"></div>
       <div class="field"><label>כתובת</label><input id="address" placeholder="לא חובה"></div>
     </div>
     <div class="field"><label>הובא ע"י</label><input id="broughtBy" placeholder="לא חובה — אם מישהו אחר הביא בשם הלקוח"></div>
@@ -318,7 +318,7 @@
       <div class="field"><label>שם משפחה</label><input id="editLastName"></div>
     </div>
     <div class="grid2">
-      <div class="field"><label>טלפון</label><input id="editPhone" type="tel" inputmode="numeric" autocomplete="tel"></div>
+      <div class="field"><label>טלפון</label><input id="editPhone" type="tel" inputmode="numeric"></div>
       <div class="field"><label>כתובת</label><input id="editAddress"></div>
     </div>
     <div class="field"><label>הובא ע"י</label><input id="editBroughtBy" placeholder="לא חובה"></div>
@@ -1716,6 +1716,14 @@ async function handoverFromList(code, phone){
 }
 // ברירת מחדל בפתיחת הדף: "כל ההזמנות"
 loadList(); loadSummary();
+// בלי השלמה אוטומטית של הדפדפן (שמות/טלפונים שהוקלדו בעבר) — מפריעה בהזנת הזמנה. ההצעות שלנו ללקוח קיים
+// (מ-6 ספרות טלפון) נשארות. autocomplete="off" לכל שדה, גם לשדות שנוצרים אחר כך (שקיות, עריכה).
+function disableBrowserAutofill(root){
+  (root || document).querySelectorAll('input:not([type=checkbox]):not([type=radio]), textarea').forEach(el => el.setAttribute('autocomplete', 'off'));
+}
+disableBrowserAutofill();
+new MutationObserver(muts => muts.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1) disableBrowserAutofill(n); })))
+  .observe(document.body, { childList: true, subtree: true });
 </script>
 </body>
 </html>
