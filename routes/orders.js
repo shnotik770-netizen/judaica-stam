@@ -5,6 +5,7 @@ import { enqueuePrint } from "../lib/printQueue.js";
 import { toHebrewDate } from "../lib/hebrewDate.js";
 import { sendSms } from "../lib/call2all.js";
 import { markSmsDirty } from "../lib/smsStore.js";
+import { cleanPhone } from "../lib/phone.js";
 import { logActivity, snapshotBagStates, BAG_STATE_FIELDS } from "../lib/activityLog.js";
 import { getSetting, setSetting } from "../lib/settings.js";
 import { cleanVariant, variantText, cleanMezuzahCases, VARIANT_FIELDS } from "../lib/variant.js";
@@ -89,6 +90,7 @@ function printBagLabel(order_number, customer, bag, orderDate) {
   const text = [
     `הזמנה ${order_number} | שקית ${bag.bag_code}`,
     `${[customer.first_name, customer.last_name].filter(Boolean).join(" ")} · ${customer.phone}`,
+    ...(customer.address ? [customer.address] : []), // שורת כתובת — רק אם יש
     toHebrewDate(orderDate || new Date()),
     labelItemText(bag),
   ].join("\n");
@@ -119,6 +121,11 @@ router.post("/", asyncHandler(async (req, res) => {
   if (!customer?.phone || (!customer.first_name && !customer.last_name) || !Array.isArray(bags) || bags.length === 0) {
     res.status(400).json({ error: "טלפון, שם (פרטי או משפחה) ולפחות שקית אחת נדרשים" });
     return;
+  }
+  {
+    const p = cleanPhone(customer.phone);
+    if (p.error) { res.status(400).json({ error: p.error }); return; }
+    customer.phone = p.phone;
   }
   for (const b of bags) {
     if (!ITEM_TYPES.includes(b.item_type)) {
@@ -156,11 +163,12 @@ router.post("/", asyncHandler(async (req, res) => {
     let customerId;
     if (existing.rows.length > 0) {
       customerId = existing.rows[0].id;
-      await client.query(
+      const upd = await client.query(
         // כתובת לא חובה (הטופס מזהיר ומאפשר להמשיך) — כתובת ריקה לא מוחקת כתובת קיימת של לקוח מוכר
-        "update customers set first_name=$1, last_name=$2, address=coalesce(nullif($3, ''), address) where id=$4",
+        "update customers set first_name=$1, last_name=$2, address=coalesce(nullif($3, ''), address) where id=$4 returning address",
         [customer.first_name, customer.last_name, (customer.address || "").trim(), customerId]
       );
+      customer.address = upd.rows[0].address; // למדבקה — הכתובת בפועל
     } else {
       const inserted = await client.query(
         `insert into customers (first_name, last_name, phone, address)
@@ -727,6 +735,11 @@ router.put("/:order_number", asyncHandler(async (req, res) => {
     res.status(400).json({ error: "טלפון ושם (פרטי או משפחה) נדרשים" });
     return;
   }
+  {
+    const p = cleanPhone(customer.phone);
+    if (p.error) { res.status(400).json({ error: p.error }); return; }
+    customer.phone = p.phone;
+  }
   const o = await pool.query(
     `select o.id, o.customer_id, o.brought_by, c.first_name, c.last_name, c.phone, c.address
      from orders o join customers c on c.id = o.customer_id where o.order_number = $1`,
@@ -869,7 +882,7 @@ router.post("/:order_number/bags", asyncHandler(async (req, res) => {
     return;
   }
   const o = await pool.query(
-    `select o.id, o.order_number, c.first_name, c.last_name, c.phone
+    `select o.id, o.order_number, c.first_name, c.last_name, c.phone, c.address
      from orders o join customers c on c.id = o.customer_id where o.order_number = $1`,
     [req.params.order_number]
   );
@@ -984,7 +997,7 @@ router.put("/bags/:bag_code/force-status", asyncHandler(async (req, res) => {
 router.post("/bags/:bag_code/reprint", asyncHandler(async (req, res) => {
   const { rows } = await pool.query(
     `select b.bag_code, b.item_type, b.quantity, b.variant, b.mezuzah_cases, o.order_number, o.created_at as order_created_at,
-            c.first_name, c.last_name, c.phone
+            c.first_name, c.last_name, c.phone, c.address
      from bags b join orders o on o.id = b.order_id join customers c on c.id = o.customer_id
      where b.bag_code = $1`,
     [req.params.bag_code]

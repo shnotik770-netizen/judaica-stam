@@ -69,6 +69,7 @@
   .top-bar h1{white-space:nowrap;}
   .link-out{display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:8px 14px;font-size:13px;font-weight:600;color:var(--accent);text-decoration:none;}
   .link-out:hover{background:var(--accent-soft);}
+  input.invalid{border-color:var(--danger);background:var(--danger-soft);}
   .search-wrap{position:relative;}
   .search-wrap input{padding-left:38px;}
   .search-wrap button{position:absolute;left:6px;top:50%;transform:translateY(-50%);width:28px;height:28px;border:none;border-radius:50%;background:var(--surface-2);color:var(--text-muted);font-size:13px;cursor:pointer;}
@@ -658,6 +659,7 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
     document.getElementById('firstName').focus();
     return;
   }
+  if (!checkPhoneField('phone', msg)) return;
   if (bags.length === 0) { msg.className = 'msg err'; msg.textContent = 'צריך לפחות שקית אחת.'; return; }
   const noType = bags.findIndex(b => !b.item_type);
   if (noType >= 0) {
@@ -1042,6 +1044,7 @@ document.getElementById('editSave').addEventListener('click', async () => {
     const mezuzah_cases = readCases(variantRowEl);
     return { bag_code: code, item_type: sel.value, item_type_note: note || null, quantity: +qty || 1, variant, mezuzah_cases };
   });
+  if (!checkPhoneField('editPhone', msg)) return;
   const body = {
     customer: {
       first_name: document.getElementById('editFirstName').value.trim(),
@@ -1090,6 +1093,38 @@ document.getElementById('filterCollection').addEventListener('input', () => {
 });
 
 // --- פעולות מהירות על רשימת "כל ההזמנות" (דיווח ללקוח / מסירה ללקוח) ---
+// טלפון: אותו נרמול ובדיקה כמו בשרת (lib/phone.js) — ספרות בלבד, 972 → 0
+function normalizePhoneInput(v){
+  let d = String(v || '').replace(/\D/g, '');
+  if (d.startsWith('972')) d = '0' + d.slice(3);
+  else if (/^[5-9]\d{8}$/.test(d) || /^[2-4]\d{7}$/.test(d)) d = '0' + d;
+  return d;
+}
+function isValidPhone(d){ return /^0[57]\d{8}$/.test(d) || /^0[23489]\d{7}$/.test(d); }
+// מנרמל את השדה; אם לא תקין — הודעה, סימון אדום ופוקוס. מחזיר true אם תקין
+function checkPhoneField(id, msgEl){
+  const el = document.getElementById(id);
+  const d = normalizePhoneInput(el.value);
+  el.value = d;
+  const ok = isValidPhone(d);
+  el.classList.toggle('invalid', !ok);
+  if (!ok) {
+    msgEl.className = 'msg err';
+    msgEl.textContent = 'מספר טלפון לא תקין — נייד: 10 ספרות שמתחילות ב-05 (או 07), קווי: 9 ספרות (02/03/04/08/09).';
+    el.focus();
+  }
+  return ok;
+}
+['phone', 'editPhone'].forEach(id => {
+  const el = document.getElementById(id);
+  // ביציאה מהשדה — מקפים/רווחים/+972 מנורמלים מיד, וסימון אדום אם המספר לא תקין
+  el.addEventListener('blur', () => {
+    if (!el.value.trim()) { el.classList.remove('invalid'); return; }
+    el.value = normalizePhoneInput(el.value);
+    el.classList.toggle('invalid', !isValidPhone(el.value));
+  });
+  el.addEventListener('input', () => el.classList.remove('invalid'));
+});
 function fullName(c){ return c ? [c.first_name, c.last_name].filter(Boolean).join(' ') : ''; }
 // קישור וואטסאפ (wa.me) עם טקסט מוכן — פותח את האפליקציה; השליחה עצמה בלחיצה אחת בוואטסאפ
 function waLink(phone, text){

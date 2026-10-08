@@ -1,5 +1,6 @@
 import express from "express";
 import { pool } from "../lib/db.js";
+import { cleanPhone } from "../lib/phone.js";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import { logActivity, snapshotBagStates } from "../lib/activityLog.js";
 import { ITEM_TYPES, ITEM_TYPE_LABELS } from "../lib/itemTypes.js";
@@ -425,8 +426,13 @@ async function applySupplierUpdate(item) {
   if (customer && typeof customer === "object") {
     for (const key of Object.keys(CUSTOMER_FIELD_LABELS)) {
       if (customer[key] === undefined) continue;
-      const value = String(customer[key] ?? "").trim();
+      let value = String(customer[key] ?? "").trim();
       if (!value && key === "phone") return { bag_code, ok: false, error: "phone לא יכול להיות ריק" };
+      if (key === "phone") {
+        const p = cleanPhone(value);
+        if (p.error) return { bag_code, ok: false, error: p.error };
+        value = p.phone;
+      }
       if (value !== (bag[key] || "")) {
         customerSets[key] = value;
         changes.push(`${CUSTOMER_FIELD_LABELS[key]}: מ-${shown(bag[key])} ל-${shown(value)}`);

@@ -201,3 +201,8 @@ create table if not exists sms_sync (
 -- "נקרא" לפי id של ההודעה הנכנסת האחרונה שנקראה (במקום מחרוזת הזמן)
 alter table sms_reads add column if not exists last_read_id bigint;
 alter table sms_reads alter column last_read_in drop not null;
+
+-- טלפונים בפורמט אחיד (lib/phone.js): ספרות בלבד, 972 → 0. מיישר נתונים ישנים שנשמרו עם מקפים/רווחים/+972,
+-- כדי שאותו לקוח יימצא תמיד (שיוך לפי טלפון, קיבוץ שקיות בדיווח SMS). אידמפוטנטי.
+update customers set phone = regexp_replace(regexp_replace(phone, '\D', '', 'g'), '^972', '0')
+where phone is distinct from regexp_replace(regexp_replace(phone, '\D', '', 'g'), '^972', '0');
