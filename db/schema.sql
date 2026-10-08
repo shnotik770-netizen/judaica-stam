@@ -178,3 +178,26 @@ create table if not exists sms_reads (
   last_read_in text not null,
   updated_at timestamptz not null default now()
 );
+
+-- היסטוריית SMS שמורה אצלנו (lib/smsStore.js) — כל סנכרון מושך מ-Call2All רק את מה שחדש מאז הקודם.
+-- raw_time = הזמן כפי ש-Call2All מחזירה (חלק מהמפתח הייחודי נגד כפילויות); sent_at = אותו זמן מפוענח (שעון ישראל), אם הצליח.
+create table if not exists sms_messages (
+  id bigserial primary key,
+  direction text not null check (direction in ('in', 'out')),
+  phone text not null,
+  message text not null default '',
+  raw_time text not null default '',
+  sent_at timestamptz,
+  delivery_report text,
+  fetched_at timestamptz not null default now()
+);
+create unique index if not exists uq_sms_messages on sms_messages(direction, phone, raw_time, md5(message));
+create index if not exists idx_sms_messages_phone on sms_messages(phone);
+create table if not exists sms_sync (
+  kind text primary key,
+  last_sync_at timestamptz,
+  last_full_at timestamptz
+);
+-- "נקרא" לפי id של ההודעה הנכנסת האחרונה שנקראה (במקום מחרוזת הזמן)
+alter table sms_reads add column if not exists last_read_id bigint;
+alter table sms_reads alter column last_read_in drop not null;

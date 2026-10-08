@@ -4,6 +4,7 @@ import { asyncHandler } from "../lib/asyncHandler.js";
 import { enqueuePrint } from "../lib/printQueue.js";
 import { toHebrewDate } from "../lib/hebrewDate.js";
 import { sendSms } from "../lib/call2all.js";
+import { markSmsDirty } from "../lib/smsStore.js";
 import { logActivity, snapshotBagStates, BAG_STATE_FIELDS } from "../lib/activityLog.js";
 import { getSetting, setSetting } from "../lib/settings.js";
 import { cleanVariant, variantText, cleanMezuzahCases, VARIANT_FIELDS } from "../lib/variant.js";
@@ -423,6 +424,7 @@ router.post("/scan", asyncHandler(async (req, res) => {
       if (action === "notify_sms") {
         try {
           await sendSms(bag.phone, message);
+          markSmsDirty();
         } catch (e) {
           // ה-UI מציג על זה התראה קבועה עד שסוגרים אותה — לכן מחזירים את פרטי השקית/הלקוח/הקבוצה
           logActivity(bag.bag_code, bag.order_number, "sms_failed", e.message);

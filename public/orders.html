@@ -81,8 +81,8 @@
   .badge.notified{background:#eef0fb;color:#3d4a9e;}
   .badge.collected{background:var(--ok-soft);color:var(--ok);}
   .mode-tabs{display:flex;gap:6px;}
-  .admin-nav{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
-  @media (max-width:560px){.admin-nav{grid-template-columns:1fr 1fr;}}
+  .admin-nav{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;}
+  @media (max-width:560px){.admin-nav{grid-template-columns:1fr 1fr 1fr;}}
   .admin-nav-btn{padding:12px 6px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:13.5px;font-weight:600;cursor:pointer;}
   .admin-nav-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
   .mode-tab{flex:1;text-align:center;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);cursor:pointer;font-size:12.5px;font-weight:600;color:var(--text-muted);}
@@ -190,6 +190,7 @@
   .bubble.in{align-self:flex-start;background:var(--surface-2);border:1px solid var(--border);}
   .bubble.out{align-self:flex-end;background:var(--accent);color:#fff;}
   .bubble.new{outline:2px solid var(--danger);}
+  button.chat-btn{background:var(--accent-soft);color:var(--accent);border:none;border-radius:7px;padding:4px 9px;font-family:inherit;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap;}
   button.wa-btn{background:#25d366;color:#fff;border:none;border-radius:9px;padding:10px 14px;font-family:inherit;font-weight:700;font-size:14px;cursor:pointer;}
   button.wa-mini{background:#25d366;color:#fff;border:none;border-radius:7px;padding:4px 9px;font-family:inherit;font-weight:700;font-size:12px;cursor:pointer;margin-top:4px;}
   #qaBanner{flex-wrap:wrap;}
@@ -225,8 +226,7 @@
   <div class="tabs">
     <div class="tab" data-tab="new">הזמנה חדשה</div>
     <div class="tab active" data-tab="list">כל ההזמנות</div>
-    <div class="tab" data-tab="sms">💬 SMS <span class="unread-badge hidden" id="smsUnreadBadge"></span></div>
-    <div class="tab" data-tab="admin">ניהול</div>
+    <div class="tab" data-tab="admin">ניהול <span class="unread-badge hidden" id="smsUnreadBadge" title="הודעות SMS שלא נקראו"></span></div>
   </div>
 
   <div id="newPanel" class="hidden">
@@ -330,7 +330,10 @@
   <div id="editPanel" class="card hidden">
     <div class="top-bar">
       <b id="editTitle">הזמנה</b>
-      <button type="button" class="btn-ghost" id="editBack">← חזרה לרשימה</button>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button type="button" class="btn-ghost" id="editChat">💬 התכתבות עם הלקוח</button>
+        <button type="button" class="btn-ghost" id="editBack">← חזרה לרשימה</button>
+      </div>
     </div>
     <div class="msg" id="editLockedMsg" style="display:none;background:#fbf0e3;color:#8a5a1f;">
       ההזמנה הזו כבר נכנסה למערכת הספק — לא ניתן לערוך או למחוק אותה יותר, רק לצפות.
@@ -369,30 +372,6 @@
     <div class="msg" id="editMsg"></div>
   </div>
 
-  <div id="smsPanel" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
-    <div id="smsInboxView" class="card" style="gap:8px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-        <b>💬 הודעות SMS — נכנס ויוצא</b>
-        <button type="button" class="link-out" id="smsRefresh" style="cursor:pointer;font-family:inherit;">↻ רענון</button>
-      </div>
-      <div class="sub" style="margin:0;">ממוין לפי ההודעה הנכנסת האחרונה. מודגש = יש הודעות שלא נקראו.</div>
-      <div id="smsThreads" class="sms-threads"></div>
-    </div>
-    <div id="smsThreadView" class="card hidden" style="gap:10px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-        <button type="button" class="link-out" id="smsBack" style="cursor:pointer;font-family:inherit;">→ חזרה לרשימה</button>
-        <div style="text-align:left;"><b id="smsThreadName"></b><div class="sub" style="margin:0;direction:ltr;" id="smsThreadPhone"></div></div>
-      </div>
-      <div id="smsConversation" class="sms-conv"></div>
-      <textarea id="smsReply" rows="3" placeholder="כתוב הודעה ללקוח…"></textarea>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button type="button" class="btn-primary" id="smsReplySend">📨 שלח SMS</button>
-        <button type="button" class="wa-btn" id="smsReplyWa">💬 שלח בוואטסאפ</button>
-      </div>
-      <div class="msg" id="smsReplyMsg"></div>
-    </div>
-  </div>
-
   <div id="personalSmsModal" class="modal-back hidden">
     <div class="card modal-card">
       <b id="psTitle"></b>
@@ -412,6 +391,30 @@
       <button type="button" class="admin-nav-btn" data-section="sms">📨 תבניות SMS</button>
       <button type="button" class="admin-nav-btn" data-section="customers">👥 מאגר לקוחות</button>
       <button type="button" class="admin-nav-btn" data-section="log">📋 יומן פעולות</button>
+      <button type="button" class="admin-nav-btn" data-section="inbox">💬 הודעות SMS <span class="unread-badge hidden" id="smsUnreadBadge2"></span></button>
+    </div>
+  <div class="admin-section hidden" data-section="inbox" id="smsPanel" style="display:flex;flex-direction:column;gap:12px;">
+      <div id="smsInboxView" class="card" style="gap:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <b>💬 הודעות SMS — נכנס ויוצא</b>
+          <button type="button" class="link-out" id="smsRefresh" style="cursor:pointer;font-family:inherit;">↻ רענון</button>
+        </div>
+        <div class="sub" style="margin:0;">ממוין לפי ההודעה האחרונה (נכנסת או יוצאת) — החדשה למעלה. מודגש = יש הודעות שלא נקראו. ההודעות נשמרות אצלנו, וכל עדכון מושך רק את החדשות; "↻ רענון" מושך הכל מחדש.</div>
+        <div id="smsThreads" class="sms-threads"></div>
+      </div>
+      <div id="smsThreadView" class="card hidden" style="gap:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <button type="button" class="link-out" id="smsBack" style="cursor:pointer;font-family:inherit;">→ חזרה לרשימה</button>
+          <div style="text-align:left;"><b id="smsThreadName"></b><div class="sub" style="margin:0;direction:ltr;" id="smsThreadPhone"></div></div>
+        </div>
+        <div id="smsConversation" class="sms-conv"></div>
+        <textarea id="smsReply" rows="3" placeholder="כתוב הודעה ללקוח…"></textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn-primary" id="smsReplySend">📨 שלח SMS</button>
+          <button type="button" class="wa-btn" id="smsReplyWa">💬 שלח בוואטסאפ</button>
+        </div>
+        <div class="msg" id="smsReplyMsg"></div>
+      </div>
     </div>
     <div class="card admin-section hidden" data-section="fix">
       <b>תיקון ידני</b>
@@ -705,9 +708,7 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   document.getElementById('listPanel').classList.toggle('hidden', tab !== 'list');
   document.getElementById('editPanel').classList.add('hidden');
   document.getElementById('adminPanel').classList.toggle('hidden', tab !== 'admin');
-  document.getElementById('smsPanel').classList.toggle('hidden', tab !== 'sms');
   if (tab !== 'list') cancelQuickAction();
-  if (tab === 'sms') { closeSmsThread(); loadSmsInbox(); }
   if (tab === 'list') { loadList(); loadSummary(); }
   if (tab === 'admin') showAdminSection(currentAdminSection);
 }));
@@ -1642,10 +1643,15 @@ async function loadCustomers(){
         ? '<span class="badge notified">' + c.awaiting_customer_count + ' מחכים לאיסוף</span>'
         : '<span class="badge" style="background:var(--surface-2);color:var(--text-muted);">' + c.order_count + ' הזמנות</span>';
       return '<div class="bag-row" data-phone="' + esc(c.phone) + '" style="cursor:pointer;">' +
-        '<div><div class="who">' + esc(c.first_name) + ' ' + esc(c.last_name) + ' · ' + esc(c.phone) + supplierNo + '</div>' +
+        '<div><div class="who">' + esc(fullName(c)) + ' · ' + esc(c.phone) + supplierNo + '</div>' +
         '<div class="sub">' + esc(c.address || '') + ' · ' + c.order_count + ' הזמנות, ' + c.bag_count + ' שקיות' + last + '</div></div>' +
-        awaiting + '</div>';
+        '<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;">' + awaiting +
+        '<button type="button" class="chat-btn" data-phone="' + esc(c.phone) + '" data-name="' + esc(fullName(c)) + '">💬 התכתבות</button></div></div>';
     }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:20px;">אין לקוחות תואמים</div>';
+    listEl.querySelectorAll('.chat-btn').forEach(b => b.addEventListener('click', e => {
+      e.stopPropagation();
+      openChatWith(b.dataset.phone, b.dataset.name);
+    }));
     listEl.querySelectorAll('.bag-row').forEach(row => {
       row.addEventListener('click', () => {
         document.getElementById('filterSearch').value = row.dataset.phone;
@@ -1664,7 +1670,7 @@ document.getElementById('customerSearch').addEventListener('input', () => {
 });
 // --- ניהול: 4 כפתורים בראש הדף, כל אחד מציג את החלק שלו (ברירת מחדל: יומן פעולות) ---
 let currentAdminSection = 'log';
-const ADMIN_SECTION_LOADERS = { fix: () => {}, sms: () => loadSettings(), customers: () => loadCustomers(), log: () => loadActivityLog() };
+const ADMIN_SECTION_LOADERS = { fix: () => {}, sms: () => loadSettings(), customers: () => loadCustomers(), log: () => loadActivityLog(), inbox: () => { closeSmsThread(); loadSmsInbox(); } };
 function showAdminSection(section){
   currentAdminSection = section;
   document.querySelectorAll('.admin-nav-btn').forEach(b => b.classList.toggle('active', b.dataset.section === section));
@@ -1884,23 +1890,38 @@ new MutationObserver(muts => muts.forEach(m => m.addedNodes.forEach(n => { if (n
 function smsTimeText(t){
   if (!t) return '';
   const d = new Date(String(t).replace(' ', 'T'));
-  return isNaN(d) ? String(t) : d.toLocaleString('he-IL', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
+  if (isNaN(d)) return String(t);
+  const opts = { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = '2-digit';
+  return d.toLocaleString('he-IL', opts);
 }
 let smsThreads = [], smsOpenPhone = null;
 function setSmsBadge(n){
-  const b = document.getElementById('smsUnreadBadge');
-  b.textContent = n; b.classList.toggle('hidden', !n);
+  ['smsUnreadBadge', 'smsUnreadBadge2'].forEach(id => {
+    const b = document.getElementById(id);
+    b.textContent = n; b.classList.toggle('hidden', !n);
+  });
 }
-async function loadSmsInbox(silent){
+// מעבר להתכתבות עם לקוח (ממאגר הלקוחות / ממסך הזמנה) — נפתח בניהול → הודעות SMS
+async function openChatWith(phone, name){
+  const digits = String(phone || '').replace(/\D/g, '').replace(/^972/, '0');
+  if (!digits) return;
+  currentAdminSection = 'inbox';
+  document.querySelector('.tab[data-tab="admin"]').click();
+  await loadSmsInbox(true);
+  const t = smsThreads.find(x => x.phone === digits);
+  openSmsThread(t ? Object.assign({}, t, { name: t.name || name }) : { phone: digits, name: name || '', unread: 0 });
+}
+async function loadSmsInbox(silent, full){
   const box = document.getElementById('smsThreads');
   if (!silent) box.innerHTML = '<div class="sub" style="margin:0;">טוען…</div>';
   try {
-    const res = await fetch(API_BASE + '/api/sms/inbox');
+    const res = await fetch(API_BASE + '/api/sms/inbox' + (full ? '?refresh=1' : ''));
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'שגיאה');
     smsThreads = data.threads || [];
     setSmsBadge(data.unread_threads || 0);
-    if (document.getElementById('smsPanel').classList.contains('hidden') && silent) return;
+    if (silent && document.getElementById('smsThreadView').classList.contains('hidden') === false) return;
     box.innerHTML = smsThreads.length ? smsThreads.map((t, i) =>
       '<div class="sms-thread' + (t.unread ? ' unread' : '') + '" data-i="' + i + '">' +
         '<div style="min-width:0;"><div class="t-name">' + esc(t.name || t.phone) + (t.unread ? ' <span class="unread-badge">' + t.unread + '</span>' : '') +
@@ -1908,6 +1929,7 @@ async function loadSmsInbox(silent){
         '<div class="t-last">' + (t.last_direction === 'out' ? '↩ ' : '') + esc(t.last_message || '') + '</div></div>' +
         '<div class="t-time">' + esc(smsTimeText(t.last_time)) + '</div></div>').join('')
       : '<div class="sub" style="margin:0;">אין הודעות.</div>';
+    if (data.sync_error) box.insertAdjacentHTML('afterbegin', '<div class="msg err">לא הצלחתי למשוך הודעות חדשות (' + esc(data.sync_error) + ') — מוצג מה שכבר שמור.</div>');
     box.querySelectorAll('.sms-thread').forEach(el => el.onclick = () => openSmsThread(smsThreads[+el.dataset.i]));
   } catch (err) {
     if (!silent) box.innerHTML = '<div class="msg err">' + esc(err.message) + '</div>';
@@ -1928,9 +1950,9 @@ async function openSmsThread(t){
   document.getElementById('smsReplyMsg').textContent = '';
   await loadSmsConversation(t.unread);
   // פתיחת השיחה = נקרא
-  if (t.last_in) {
+  if (t.last_in_id) {
     fetch(API_BASE + '/api/sms/read', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: t.phone, last_in: t.last_in }) }).then(() => loadSmsInbox(true)).catch(() => {});
+      body: JSON.stringify({ phone: t.phone, last_in_id: t.last_in_id }) }).then(() => loadSmsInbox(true)).catch(() => {});
   }
 }
 async function loadSmsConversation(unreadCount){
@@ -1954,8 +1976,10 @@ async function loadSmsConversation(unreadCount){
     box.innerHTML = '<div class="msg err">' + esc(err.message) + '</div>';
   }
 }
+document.getElementById('editChat').onclick = () => openChatWith(document.getElementById('editPhone').value,
+  [document.getElementById('editFirstName').value.trim(), document.getElementById('editLastName').value.trim()].filter(Boolean).join(' '));
 document.getElementById('smsBack').onclick = () => { closeSmsThread(); loadSmsInbox(); };
-document.getElementById('smsRefresh').onclick = () => loadSmsInbox();
+document.getElementById('smsRefresh').onclick = () => loadSmsInbox(false, true); // משיכה מלאה מ-Call2All
 document.getElementById('smsReplySend').onclick = async () => {
   const text = document.getElementById('smsReply').value.trim();
   const msg = document.getElementById('smsReplyMsg');
