@@ -465,7 +465,7 @@ async function loadMine(){
   const countEl = document.getElementById('mineCount');
   countEl.textContent = 'טוען…';
   try {
-    const res = await fetch('/api/supplier/with-me');
+    const res = await fetch('/api/supplier/with-me?view=1');
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
     mineBags = data.bags;

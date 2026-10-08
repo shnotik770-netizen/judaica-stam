@@ -94,11 +94,13 @@ router.get("/pending", asyncHandler(async (req, res) => {
 
 // כל השקיות שכרגע אצל הספק, פלוס מה שהוחזר לאחרונה (שעתיים אחרונות — שלב "במסירה לחנות") — למסך "מה אצלי".
 // קריאה לנתיב הזה היא גם "משיכה" של השקיות לתוכנה שלו — לכן מסמנת imported_at לכל שקית
-// שעוד לא נמשכה (בלי לגעת בשקיות שכבר סומנו).
+// שעוד לא נמשכה (בלי לגעת בשקיות שכבר סומנו). ?view=1 — צפייה בלבד (הדף של מיכאל באתר), לא מסמן משיכה.
 router.get("/with-me", asyncHandler(async (req, res) => {
-  await pool.query(
-    "update bags set imported_at = now() where status = 'with_supplier' and imported_at is null"
-  );
+  if (req.query.view !== "1") {
+    await pool.query(
+      "update bags set imported_at = now() where status = 'with_supplier' and imported_at is null"
+    );
+  }
   const { rows } = await pool.query(
     BAG_SELECT + ` where b.status = 'with_supplier'
        or (b.status = 'returned' and b.returned_at > now() - interval '2 hours')
