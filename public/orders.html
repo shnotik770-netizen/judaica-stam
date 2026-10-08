@@ -69,6 +69,9 @@
   .top-bar h1{white-space:nowrap;}
   .link-out{display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:8px 14px;font-size:13px;font-weight:600;color:var(--accent);text-decoration:none;}
   .link-out:hover{background:var(--accent-soft);}
+  .search-wrap{position:relative;}
+  .search-wrap input{padding-left:38px;}
+  .search-wrap button{position:absolute;left:6px;top:50%;transform:translateY(-50%);width:28px;height:28px;border:none;border-radius:50%;background:var(--surface-2);color:var(--text-muted);font-size:13px;cursor:pointer;}
   .filters{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;}
   @media (max-width:560px){.filters{grid-template-columns:1fr;}}
   .filters select,.filters input{font-size:13px;padding:8px 10px;}
@@ -285,7 +288,7 @@
       </select>
       <input id="filterCollection" type="number" placeholder="מספר איסוף">
     </div>
-    <input id="filterSearch" placeholder="חיפוש לפי שם / טלפון / מספר הזמנה…">
+    <div class="search-wrap"><input id="filterSearch" placeholder="חיפוש לפי שם / טלפון / מספר הזמנה…"><button type="button" id="filterSearchClear" class="hidden" title="נקה חיפוש" aria-label="נקה חיפוש">✕</button></div>
 
     <div id="quickActionActive" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
       <div class="purpose-bar qa-hide">
@@ -370,6 +373,18 @@
       <button type="button" class="btn-primary" id="editSave">שמור שינויים</button>
     </div>
     <div class="msg" id="editMsg"></div>
+  </div>
+
+  <div id="chatChoiceModal" class="modal-back hidden">
+    <div class="card modal-card">
+      <b id="ccTitle"></b>
+      <div class="sub" style="margin:0;">איך להתכתב עם הלקוח?</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="btn-primary" id="ccSms">📨 SMS</button>
+        <button type="button" class="wa-btn" id="ccWa">💬 וואטסאפ</button>
+        <button type="button" class="link-out" id="ccCancel" style="cursor:pointer;font-family:inherit;">ביטול</button>
+      </div>
+    </div>
   </div>
 
   <div id="personalSmsModal" class="modal-back hidden">
@@ -700,6 +715,7 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
 });
 
 // --- תצוגת כל ההזמנות ---
+let keepSearchOnce = false;
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
   t.classList.add('active');
@@ -709,7 +725,12 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   document.getElementById('editPanel').classList.add('hidden');
   document.getElementById('adminPanel').classList.toggle('hidden', tab !== 'admin');
   if (tab !== 'list') cancelQuickAction();
-  if (tab === 'list') { loadList(); loadSummary(); }
+  if (tab === 'list') {
+    // חזרה ל"כל ההזמנות" מלשונית אחרת — החיפוש הקודם נמחק (חוץ ממעבר מכוון, כמו לחיצה על לקוח במאגר)
+    if (keepSearchOnce) keepSearchOnce = false; else clearListSearch();
+    syncSearchClear();
+    loadList(); loadSummary();
+  }
   if (tab === 'admin') showAdminSection(currentAdminSection);
 }));
 
@@ -816,7 +837,12 @@ async function loadList(){
     countEl.textContent = 'שגיאה: ' + err.message;
   }
 }
+// ✕ בשדה החיפוש — מופיע רק כשיש טקסט
+function syncSearchClear(){ document.getElementById('filterSearchClear').classList.toggle('hidden', !document.getElementById('filterSearch').value); }
+function clearListSearch(){ document.getElementById('filterSearch').value = ''; syncSearchClear(); }
+document.getElementById('filterSearchClear').addEventListener('click', () => { clearListSearch(); loadList(); document.getElementById('filterSearch').focus(); });
 document.getElementById('filterSearch').addEventListener('input', () => {
+  syncSearchClear();
   clearTimeout(window._searchDebounce);
   window._searchDebounce = setTimeout(loadList, 400);
 });
@@ -1650,11 +1676,12 @@ async function loadCustomers(){
     }).join('') || '<div style="color:var(--text-muted);text-align:center;padding:20px;">אין לקוחות תואמים</div>';
     listEl.querySelectorAll('.chat-btn').forEach(b => b.addEventListener('click', e => {
       e.stopPropagation();
-      openChatWith(b.dataset.phone, b.dataset.name);
+      chooseChat(b.dataset.phone, b.dataset.name);
     }));
     listEl.querySelectorAll('.bag-row').forEach(row => {
       row.addEventListener('click', () => {
         document.getElementById('filterSearch').value = row.dataset.phone;
+        keepSearchOnce = true;
         document.querySelector('.tab[data-tab="list"]').click();
       });
     });
@@ -1902,7 +1929,17 @@ function setSmsBadge(n){
     b.textContent = n; b.classList.toggle('hidden', !n);
   });
 }
-// מעבר להתכתבות עם לקוח (ממאגר הלקוחות / ממסך הזמנה) — נפתח בניהול → הודעות SMS
+// כפתור "💬 התכתבות" (מאגר לקוחות / מסך הזמנה): קודם שואלים — SMS (השיחה בניהול → הודעות SMS) או וואטסאפ (פותח את הצ'אט באפליקציה)
+function chooseChat(phone, name){
+  const modal = document.getElementById('chatChoiceModal');
+  document.getElementById('ccTitle').textContent = '💬 ' + (name ? name + ' · ' : '') + phone;
+  const close = () => modal.classList.add('hidden');
+  document.getElementById('ccSms').onclick = () => { close(); openChatWith(phone, name); };
+  document.getElementById('ccWa').onclick = () => { close(); openWhatsApp(phone, ''); };
+  document.getElementById('ccCancel').onclick = close;
+  modal.classList.remove('hidden');
+}
+// מעבר להתכתבות SMS עם לקוח — נפתח בניהול → הודעות SMS
 async function openChatWith(phone, name){
   const digits = String(phone || '').replace(/\D/g, '').replace(/^972/, '0');
   if (!digits) return;
@@ -1976,7 +2013,7 @@ async function loadSmsConversation(unreadCount){
     box.innerHTML = '<div class="msg err">' + esc(err.message) + '</div>';
   }
 }
-document.getElementById('editChat').onclick = () => openChatWith(document.getElementById('editPhone').value,
+document.getElementById('editChat').onclick = () => chooseChat(document.getElementById('editPhone').value,
   [document.getElementById('editFirstName').value.trim(), document.getElementById('editLastName').value.trim()].filter(Boolean).join(' '));
 document.getElementById('smsBack').onclick = () => { closeSmsThread(); loadSmsInbox(); };
 document.getElementById('smsRefresh').onclick = () => loadSmsInbox(false, true); // משיכה מלאה מ-Call2All

@@ -96,7 +96,9 @@ router.get("/pending", asyncHandler(async (req, res) => {
 // קריאה לנתיב הזה היא גם "משיכה" של השקיות לתוכנה שלו — לכן מסמנת imported_at לכל שקית
 // שעוד לא נמשכה (בלי לגעת בשקיות שכבר סומנו). ?view=1 — צפייה בלבד (הדף של מיכאל באתר), לא מסמן משיכה.
 router.get("/with-me", asyncHandler(async (req, res) => {
-  if (req.query.view !== "1") {
+  // דפדפן (דף האתר — גם גרסה ישנה שנשארה פתוחה) תמיד רק צופה: הוא שולח sec-fetch-* , והתוכנה של מיכאל לא
+  const fromBrowser = Boolean(req.get("sec-fetch-mode") || req.get("sec-fetch-site"));
+  if (req.query.view !== "1" && !fromBrowser) {
     await pool.query(
       "update bags set imported_at = now() where status = 'with_supplier' and imported_at is null"
     );
