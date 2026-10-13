@@ -758,9 +758,12 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   document.getElementById('editPanel').classList.add('hidden');
   document.getElementById('adminPanel').classList.toggle('hidden', tab !== 'admin');
   if (tab !== 'list') cancelQuickAction();
+  // חזרה ל"הזמנה חדשה" — תמיד מתחילה כהזמנת לקוח (מצב "אספקה מסופר" לא נשאר מפעם קודמת)
+  if (tab === 'new') setOrderKind('customer');
   if (tab === 'list') {
-    // חזרה ל"כל ההזמנות" מלשונית אחרת — החיפוש הקודם נמחק (חוץ ממעבר מכוון, כמו לחיצה על לקוח במאגר)
+    // חזרה ל"כל ההזמנות" מלשונית אחרת — החיפוש והמסננים הקודמים נמחקים (חוץ ממעבר מכוון, כמו לחיצה על לקוח במאגר)
     if (keepSearchOnce) keepSearchOnce = false; else clearListSearch();
+    ['filterItemType', 'filterStatus', 'filterCollection'].forEach(id => { document.getElementById(id).value = ''; });
     syncSearchClear();
     loadList(); loadSummary();
   }
@@ -1050,11 +1053,12 @@ async function deleteHistoryRow(code, { id, action, label }){
   }
 }
 
-document.getElementById('editBack').addEventListener('click', () => {
+function closeEdit(){
   document.getElementById('editPanel').classList.add('hidden');
   document.getElementById('listPanel').classList.remove('hidden');
   loadList();
-});
+}
+document.getElementById('editBack').addEventListener('click', closeEdit);
 
 document.getElementById('editAddBag').addEventListener('click', async () => {
   try {
@@ -1084,6 +1088,13 @@ document.getElementById('editSave').addEventListener('click', async () => {
     return { bag_code: code, item_type: sel.value, item_type_note: note || null, quantity: +qty || 1, variant, mezuzah_cases };
   });
   if (!checkPhoneField('editPhone', msg)) return;
+  // מילאו סכום תשלום ולא לחצו "הוסף תשלום" — לא שומרים, כדי שהתשלום לא ילך לאיבוד
+  if (document.getElementById('payAmount').value.trim()) {
+    msg.className = 'msg err';
+    msg.textContent = 'מילאת סכום תשלום ולא לחצת "הוסף תשלום". לחץ "הוסף תשלום" (או מחק את הסכום) ואז שמור.';
+    document.getElementById('payAmount').focus();
+    return;
+  }
   const body = {
     customer: {
       first_name: document.getElementById('editFirstName').value.trim(),
@@ -1102,8 +1113,8 @@ document.getElementById('editSave').addEventListener('click', async () => {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'שגיאה');
-    msg.className = 'msg ok';
-    msg.textContent = 'נשמר.';
+    // נשמר — סוגרים את ההזמנה וחוזרים לרשימה
+    closeEdit();
   } catch (err) {
     msg.className = 'msg err';
     msg.textContent = err.message;
