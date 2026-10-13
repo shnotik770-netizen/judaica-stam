@@ -214,3 +214,69 @@ alter table orders add column if not exists kind text not null default 'customer
 alter table orders drop constraint if exists orders_kind_check;
 alter table orders add constraint orders_kind_check check (kind in ('customer', 'supply'));
 alter table bags add column if not exists returned_quantity int not null default 0;
+
+-- ===== הזמנות פריטים (דף /items.html) — הזמנה עם כמה פריטים, לכל פריט מדבקה ומעקב מצב משלו =====
+-- סוגי מוצרים ומצבים — רשימות שמנוהלות מדף הניהול. מצב נשמר לפי id, כך ששינוי שם לא דורש עדכון פריטים.
+create table if not exists product_types (
+  id serial primary key,
+  name text not null unique,
+  position int not null default 0,
+  active boolean not null default true
+);
+-- is_ready = הפריט מוכן ללקוח; is_final = סופק (נמסר) — "סמן הכל כסופק" משתמש במצב הסופי הראשון
+create table if not exists item_statuses (
+  id serial primary key,
+  name text not null unique,
+  position int not null default 0,
+  is_ready boolean not null default false,
+  is_final boolean not null default false,
+  active boolean not null default true
+);
+insert into product_types (name, position)
+select v.name, v.pos from (values ('טלית', 1), ('ציצית', 2), ('כיפה', 3), ('תיק טלית ותפילין', 4), ('כיסוי', 5), ('ספר', 6), ('אחר', 99)) as v(name, pos)
+where not exists (select 1 from product_types);
+insert into item_statuses (name, position, is_ready, is_final)
+select v.name, v.pos, v.r, v.f from (values
+  ('התקבל', 1, false, false),
+  ('בהזמנה מספק', 2, false, false),
+  ('הגיע מהספק — ממתין להטבעה / רקמה', 3, false, false),
+  ('מוכן', 4, true, false),
+  ('סופק', 5, false, true)) as v(name, pos, r, f)
+where not exists (select 1 from item_statuses);
+
+-- מספרי הזמנות פריטים: 5 ספרות (50001…), קוד פריט = מספר הזמנה + 2 ספרות (7 ספרות) — לא מתנגש בשקיות הסת"ם (6 ספרות)
+create sequence if not exists item_order_number_seq start 50001;
+create table if not exists item_orders (
+  id uuid primary key default gen_random_uuid(),
+  order_number text not null unique,
+  customer_id uuid not null references customers(id),
+  target_date date,
+  notes text,
+  supplied_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create table if not exists item_order_lines (
+  id uuid primary key default gen_random_uuid(),
+  item_order_id uuid not null references item_orders(id) on delete cascade,
+  line_no int not null,
+  item_code text not null unique,
+  product_type_id int references product_types(id),
+  description text,
+  quantity int not null default 1,
+  status_id int not null references item_statuses(id),
+  status_changed_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_item_lines_order on item_order_lines(item_order_id);
+-- היסטוריה: כל שינוי מצב / יצירה / עריכה
+create table if not exists item_events (
+  id bigserial primary key,
+  item_order_id uuid references item_orders(id) on delete cascade,
+  line_id uuid references item_order_lines(id) on delete set null,
+  item_code text,
+  action text not null,
+  detail text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_item_events_order on item_events(item_order_id);

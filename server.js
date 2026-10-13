@@ -9,6 +9,7 @@ import { syncSms, markSmsDirty, normalizePhone } from "./lib/smsStore.js";
 import { router as supplierRouter } from "./routes/supplier.js";
 import { router as ordersRouter } from "./routes/orders.js";
 import { router as labelsRouter } from "./routes/labels.js";
+import { router as itemsRouter } from "./routes/items.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,6 +35,9 @@ app.use("/api/orders", ordersRouter);
 
 // מדבקות ברקוד
 app.use("/api/label", labelsRouter);
+
+// הזמנות פריטים (דף /items.html) — כמה פריטים בהזמנה, מדבקה ומעקב מצב לכל פריט
+app.use("/api/items", itemsRouter);
 
 // שליחת SMS — הטוקן נשאר בשרת, לעולם לא בקליינט
 app.post("/api/sms/send", async (req, res) => {

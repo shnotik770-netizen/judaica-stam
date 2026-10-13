@@ -85,7 +85,7 @@
   .badge.notified{background:#eef0fb;color:#3d4a9e;}
   .badge.collected{background:var(--ok-soft);color:var(--ok);}
   .mode-tabs{display:flex;gap:6px;}
-  .admin-nav{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;}
+  .admin-nav{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
   @media (max-width:560px){.admin-nav{grid-template-columns:1fr 1fr 1fr;}}
   .admin-nav-btn{padding:12px 6px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:13.5px;font-weight:600;cursor:pointer;}
   .admin-nav-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
@@ -207,6 +207,16 @@
   .kind-btn{padding:7px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;}
   .kind-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
   .supply-tag{background:#fdf0dc;color:#8a5a1f;border-radius:6px;padding:1px 6px;font-size:11.5px;font-weight:700;}
+  .cat-list{display:flex;flex-direction:column;gap:6px;}
+  .cat-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;background:var(--surface-2);border-radius:9px;padding:6px 8px;}
+  .cat-row.inactive{opacity:.55;}
+  .cat-row .cat-name{flex:1;min-width:140px;padding:7px 9px;font-size:13.5px;}
+  .cat-row button{padding:6px 9px;font-size:12px;}
+  .cat-row button:disabled{opacity:.3;cursor:default;}
+  .cat-flag{display:flex;align-items:center;gap:4px;font-size:12.5px;margin:0;color:var(--text);}
+  .cat-flag input{width:16px;height:16px;}
+  .cat-add{display:flex;gap:8px;}
+  .cat-add button{white-space:nowrap;}
 </style>
 </head>
 <body>
@@ -216,6 +226,7 @@
     <h1>חנות יודאייקה</h1>
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
       <button type="button" class="link-out" id="quickActionShortcut" style="cursor:pointer;font-family:inherit;">⚡ פעולות מהירות</button>
+      <a class="link-out" href="/items.html" target="_blank">🧾 הזמנות פריטים</a>
       <a class="link-out" href="/supplier.html" target="_blank">↗ דף האיסוף (מיכאל)</a>
     </div>
   </div>
@@ -416,6 +427,19 @@
       <button type="button" class="admin-nav-btn" data-section="customers">👥 מאגר לקוחות</button>
       <button type="button" class="admin-nav-btn" data-section="log">📋 יומן פעולות</button>
       <button type="button" class="admin-nav-btn" data-section="inbox">💬 הודעות SMS <span class="unread-badge hidden" id="smsUnreadBadge2"></span></button>
+      <button type="button" class="admin-nav-btn" data-section="catalog">🏷️ סוגי מוצרים ומצבים</button>
+    </div>
+    <div class="card admin-section hidden" data-section="catalog">
+      <b>🏷️ הזמנות פריטים — סוגי מוצרים ומצבים</b>
+      <div class="sub" style="margin:0;">הרשימות שמופיעות בדף "🧾 הזמנות פריטים". פריט שכבר משתמש בסוג/מצב לא נמחק — אפשר להסתיר (לא פעיל) כדי שלא יוצע בהזמנות חדשות. החיצים קובעים סדר; המצב הראשון הוא ברירת המחדל לפריט חדש.</div>
+      <b style="font-size:14px;">סוגי מוצרים</b>
+      <div id="catTypes" class="cat-list"></div>
+      <div class="cat-add"><input id="catTypeNew" placeholder="סוג מוצר חדש…"><button type="button" class="btn-primary" id="catTypeAdd">הוסף</button></div>
+      <b style="font-size:14px;">מצבים</b>
+      <div class="sub" style="margin:0;">"מוכן" = הפריט מוכן ללקוח (כשכל הפריטים מוכנים ההזמנה מסומנת "הכל מוכן לאיסוף"). "סופי" = סופק — "סמן את כל ההזמנה כסופקה" מעביר לראשון מהם.</div>
+      <div id="catStatuses" class="cat-list"></div>
+      <div class="cat-add"><input id="catStatusNew" placeholder="מצב חדש…"><button type="button" class="btn-primary" id="catStatusAdd">הוסף</button></div>
+      <div class="msg" id="catMsg"></div>
     </div>
   <div class="admin-section hidden" data-section="inbox" id="smsPanel" style="display:flex;flex-direction:column;gap:12px;">
       <div id="smsInboxView" class="card" style="gap:8px;">
@@ -1780,10 +1804,63 @@ document.getElementById('customerSearch').addEventListener('input', () => {
   clearTimeout(window._customerSearchDebounce);
   window._customerSearchDebounce = setTimeout(loadCustomers, 400);
 });
+// --- ניהול: סוגי מוצרים ומצבים של "הזמנות פריטים" (/api/items) ---
+async function itemsApi(path, method, body){
+  const res = await fetch(API_BASE + '/api/items' + path, body ? { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { method: method || 'GET' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'שגיאה');
+  return data;
+}
+function catError(err){ const m = document.getElementById('catMsg'); m.className = 'msg err'; m.textContent = err.message; }
+function renderCatList(boxId, path, rows, flags){
+  const box = document.getElementById(boxId);
+  box.innerHTML = rows.map((r, i) =>
+    '<div class="cat-row' + (r.active ? '' : ' inactive') + '" data-id="' + r.id + '">' +
+      '<input class="cat-name" value="' + esc(r.name) + '">' +
+      flags.map(f => '<label class="cat-flag"><input type="checkbox" data-f="' + f[0] + '"' + (r[f[0]] ? ' checked' : '') + '>' + f[1] + '</label>').join('') +
+      '<label class="cat-flag"><input type="checkbox" data-f="active"' + (r.active ? ' checked' : '') + '>פעיל</label>' +
+      '<button type="button" class="btn-ghost cat-up" title="למעלה"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
+      '<button type="button" class="btn-ghost cat-down" title="למטה"' + (i === rows.length - 1 ? ' disabled' : '') + '>▼</button>' +
+      '<button type="button" class="btn-danger cat-del">מחק</button></div>').join('');
+  box.querySelectorAll('.cat-row').forEach((row, i) => {
+    const id = row.dataset.id;
+    row.querySelector('.cat-name').addEventListener('change', e => itemsApi('/' + path + '/' + id, 'PUT', { name: e.target.value }).then(loadCatalog, catError));
+    row.querySelectorAll('input[type=checkbox]').forEach(cb => cb.addEventListener('change', () =>
+      itemsApi('/' + path + '/' + id, 'PUT', { [cb.dataset.f]: cb.checked }).then(loadCatalog, catError)));
+    // החלפת מקום עם השכן (מספור מחדש של כל הרשימה)
+    const move = async (dir) => {
+      const order = rows.map(r => r.id);
+      const j = i + dir;
+      [order[i], order[j]] = [order[j], order[i]];
+      try { for (const [k, rid] of order.entries()) await itemsApi('/' + path + '/' + rid, 'PUT', { position: k + 1 }); loadCatalog(); } catch (err) { catError(err); }
+    };
+    row.querySelector('.cat-up').onclick = () => move(-1);
+    row.querySelector('.cat-down').onclick = () => move(1);
+    row.querySelector('.cat-del').onclick = () => { if (confirm('למחוק את "' + rows[i].name + '"?')) itemsApi('/' + path + '/' + id, 'DELETE').then(loadCatalog, catError); };
+  });
+}
+async function loadCatalog(){
+  document.getElementById('catMsg').className = 'msg';
+  try {
+    const meta = await itemsApi('/meta');
+    renderCatList('catTypes', 'product-types', meta.product_types, []);
+    renderCatList('catStatuses', 'statuses', meta.statuses, [['is_ready', 'מוכן'], ['is_final', 'סופי']]);
+  } catch (err) { catError(err); }
+}
+[['catTypeAdd', 'catTypeNew', 'product-types'], ['catStatusAdd', 'catStatusNew', 'statuses']].forEach(([btn, input, path]) => {
+  const add = () => {
+    const name = document.getElementById(input).value.trim();
+    if (!name) return;
+    itemsApi('/' + path, 'POST', { name }).then(() => { document.getElementById(input).value = ''; loadCatalog(); }, catError);
+  };
+  document.getElementById(btn).onclick = add;
+  document.getElementById(input).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+});
+
 // --- ניהול: כפתורים בראש הדף, כל אחד מציג את החלק שלו (ברירת מחדל: הודעות SMS) ---
 let currentAdminSection = 'inbox'; // ברירת מחדל: הודעות SMS
 let adminJump = null;
-const ADMIN_SECTION_LOADERS = { fix: () => {}, sms: () => loadSettings(), customers: () => loadCustomers(), log: () => loadActivityLog(), inbox: () => { closeSmsThread(); loadSmsInbox(); } };
+const ADMIN_SECTION_LOADERS = { catalog: () => loadCatalog(), fix: () => {}, sms: () => loadSettings(), customers: () => loadCustomers(), log: () => loadActivityLog(), inbox: () => { closeSmsThread(); loadSmsInbox(); } };
 function showAdminSection(section){
   currentAdminSection = section;
   document.querySelectorAll('.admin-nav-btn').forEach(b => b.classList.toggle('active', b.dataset.section === section));

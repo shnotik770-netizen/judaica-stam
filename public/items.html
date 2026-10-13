@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>הזמנות פריטים — חנות יודאייקה</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap">
+<style>
+  :root{
+    --bg:#f5f4f0; --surface:#ffffff; --surface-2:#f0eee7;
+    --text:#211f1a; --text-muted:#6b6558; --border:#e2ddd0;
+    --accent:#1e3a5f; --accent-2:#163049; --accent-soft:#e8edf3;
+    --danger:#b3432f; --danger-soft:#fbeae6; --ok:#2f6b35; --ok-soft:#e9f3ea;
+    --warn:#9a5b12; --warn-soft:#fdf0dc; --scan:#5b3d8f;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#15171b; --surface:#1d2025; --surface-2:#242830;
+      --text:#eae7df; --text-muted:#9b968a; --border:#33363d;
+      --accent:#7fa8d9; --accent-2:#9cc0ee; --accent-soft:#1f2c3b;
+      --danger:#e08a73; --danger-soft:#3a211c; --ok:#7fce89; --ok-soft:#17291b;
+      --warn:#e7b26b; --warn-soft:#3a2c17; --scan:#b49be0;
+    }
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'Heebo',-apple-system,'Segoe UI',sans-serif;padding:20px 16px 60px;}
+  .wrap{max-width:680px;margin:0 auto;display:flex;flex-direction:column;gap:16px;}
+  h1{font-size:22px;margin:0;}
+  .top-bar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  @media (max-width:480px){.grid2{grid-template-columns:1fr;}}
+  label{font-size:12.5px;color:var(--text-muted);display:block;margin-bottom:4px;}
+  input,select,textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-family:inherit;font-size:14.5px;}
+  input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:1px;}
+  input.invalid{border-color:var(--danger);background:var(--danger-soft);}
+  button{cursor:pointer;border:none;border-radius:9px;font-family:inherit;font-weight:600;font-size:14px;padding:10px 16px;}
+  .btn-primary{background:var(--accent);color:#fff;}
+  .btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text);}
+  .btn-small{padding:6px 10px;font-size:12.5px;}
+  .btn-danger{background:transparent;color:var(--danger);border:1px solid var(--danger);padding:6px 10px;font-size:12.5px;}
+  .btn-ok{background:var(--ok);color:#fff;}
+  .btn-add{background:var(--accent-soft);color:var(--accent);width:100%;}
+  .link-out{font-size:13px;color:var(--accent);text-decoration:none;border:1px solid var(--border);border-radius:9px;padding:7px 11px;background:var(--surface);font-weight:600;}
+  .tabs{display:flex;gap:8px;}
+  .tab{flex:1;text-align:center;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--surface);cursor:pointer;font-weight:600;font-size:14px;}
+  .tab.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .hidden{display:none !important;}
+  .msg{border-radius:11px;padding:12px 14px;font-size:14px;line-height:1.6;display:none;}
+  .msg.ok{display:block;background:var(--ok-soft);color:var(--ok);}
+  .msg.err{display:block;background:var(--danger-soft);color:var(--danger);}
+  .sub{color:var(--text-muted);font-size:13px;}
+  .search-wrap{position:relative;}
+  .search-wrap input{padding-left:38px;}
+  .search-wrap button{position:absolute;left:6px;top:50%;transform:translateY(-50%);width:28px;height:28px;padding:0;border-radius:50%;background:var(--surface-2);color:var(--text-muted);font-size:13px;}
+  .filters{display:grid;grid-template-columns:2fr 1fr;gap:8px;}
+  .order-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;cursor:pointer;}
+  .order-card:hover{border-color:var(--accent);}
+  .order-card.overdue{border-right:5px solid var(--danger);}
+  .order-card.soon{border-right:5px solid var(--warn);}
+  .oc-head{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;}
+  .oc-head b{font-size:15px;}
+  .chips{display:flex;flex-wrap:wrap;gap:5px;}
+  .chip{font-size:12px;border-radius:7px;padding:2px 8px;background:var(--surface-2);color:var(--text-muted);font-weight:600;}
+  .chip.ready{background:var(--ok-soft);color:var(--ok);}
+  .chip.final{background:var(--accent-soft);color:var(--accent);}
+  .due{font-size:12.5px;font-weight:700;border-radius:7px;padding:3px 8px;white-space:nowrap;}
+  .due.overdue{background:var(--danger-soft);color:var(--danger);}
+  .due.soon{background:var(--warn-soft);color:var(--warn);}
+  .due.later{background:var(--surface-2);color:var(--text-muted);}
+  .badge-ready{background:var(--ok);color:#fff;font-size:12px;font-weight:700;border-radius:7px;padding:2px 8px;}
+  .line{border:1px solid var(--border);border-radius:11px;padding:10px;display:flex;flex-direction:column;gap:8px;background:var(--surface-2);}
+  .line-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+  .line-grid{display:grid;grid-template-columns:1.2fr 2fr .7fr;gap:8px;}
+  @media (max-width:480px){.line-grid{grid-template-columns:2fr 1fr;} .line-grid .desc{grid-column:1 / -1;order:3;}}
+  .line select.status{font-weight:700;}
+  .events{display:flex;flex-direction:column;gap:4px;font-size:12.5px;max-height:260px;overflow-y:auto;}
+  .events div{background:var(--surface-2);border-radius:7px;padding:5px 9px;}
+  /* סריקה מהירה */
+  body.scan-on{--bg:#ece6f6;}
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) body.scan-on{--bg:#211a2e;} }
+  #scanPanel{border:2px solid var(--scan);}
+  .status-pick{display:flex;flex-wrap:wrap;gap:6px;}
+  .status-pick button{background:var(--surface-2);color:var(--text);border:1px solid var(--border);padding:8px 12px;font-size:13.5px;}
+  .status-pick button.active{background:var(--scan);color:#fff;border-color:var(--scan);}
+  .toggle{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;cursor:pointer;user-select:none;}
+  .toggle input{width:20px;height:20px;}
+  #scanInput{font-size:18px;text-align:center;letter-spacing:1px;}
+  .log{display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto;}
+  .entry{border-radius:9px;padding:8px 11px;font-size:13px;}
+  .entry.ok{background:var(--ok-soft);color:var(--ok);}
+  .entry.warn{background:var(--danger-soft);color:var(--danger);}
+  .entry .d{font-size:12px;opacity:.85;margin-top:2px;}
+  #cameraReader{width:100%;max-width:420px;margin:0 auto;border-radius:10px;overflow:hidden;}
+  #scanFlash{position:fixed;top:0;left:0;right:0;z-index:90;padding:10px 14px;text-align:center;font-weight:800;font-size:15px;color:#fff;transform:translateY(-110%);transition:transform .2s;}
+  #scanFlash.show{transform:none;}
+  #scanFlash.ok{background:var(--ok);}
+  #scanFlash.warn{background:var(--danger);}
+  /* ניהול רשימות (מוצג גם בדף הניהול של החנות) */
+  .admin-list{display:flex;flex-direction:column;gap:6px;}
+  .admin-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+</style>
+</head>
+<body>
+<div id="scanFlash"></div>
+<div class="wrap">
+  <div class="top-bar">
+    <h1>🧾 הזמנות פריטים</h1>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button type="button" class="link-out" id="scanToggle" style="cursor:pointer;font-family:inherit;">⚡ סריקה מהירה</button>
+      <a class="link-out" href="/orders.html">↩ הזמנות סת"ם</a>
+    </div>
+  </div>
+
+  <!-- סריקה מהירה: בוחרים מצב יעד, וכל סריקה מעדכנת את הפריט (או את כל ההזמנה) למצב הזה -->
+  <div id="scanPanel" class="card hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+      <b>⚡ סריקה מהירה — לאיזה מצב לעדכן?</b>
+      <button type="button" class="btn-ghost btn-small" id="scanClose">יציאה</button>
+    </div>
+    <div class="status-pick" id="scanStatuses"></div>
+    <label class="toggle"><input type="checkbox" id="scanWholeOrder"> עדכן את כל ההזמנה (כל הפריטים שלה)</label>
+    <div class="sub" style="margin:0;">סריקת מדבקת פריט מעדכנת את הפריט. הקלדת מספר הזמנה (5 ספרות) מעדכנת את כל ההזמנה.</div>
+    <input id="scanInput" placeholder="סרוק ברקוד…" inputmode="numeric" autocomplete="off">
+    <div style="display:flex;gap:8px;">
+      <button type="button" class="btn-ghost btn-small" id="cameraBtn">📷 מצלמה</button>
+    </div>
+    <div id="cameraReader" class="hidden"></div>
+    <div class="log" id="scanLog"></div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="active">פעילות</div>
+    <div class="tab" data-tab="new">+ הזמנה חדשה</div>
+    <div class="tab" data-tab="supplied">סופקו</div>
+  </div>
+
+  <!-- רשימה -->
+  <div id="listPanel" style="display:flex;flex-direction:column;gap:10px;">
+    <div class="filters">
+      <div class="search-wrap"><input id="search" placeholder="חיפוש לפי שם / טלפון / מספר הזמנה / פריט…" autocomplete="off"><button type="button" id="searchClear" class="hidden" aria-label="נקה חיפוש">✕</button></div>
+      <select id="statusFilter"><option value="">כל המצבים</option></select>
+    </div>
+    <div class="sub" id="listCount"></div>
+    <div id="ordersList" style="display:flex;flex-direction:column;gap:8px;"></div>
+  </div>
+
+  <!-- הזמנה חדשה -->
+  <form id="newPanel" class="card hidden" autocomplete="off">
+    <div class="grid2">
+      <div><label>שם פרטי</label><input id="nFirst" placeholder="פרטי או משפחה — אחד מהם חובה"></div>
+      <div><label>שם משפחה</label><input id="nLast" placeholder="פרטי או משפחה — אחד מהם חובה"></div>
+    </div>
+    <div class="grid2">
+      <div><label>טלפון</label><input id="nPhone" type="tel" inputmode="numeric"></div>
+      <div><label>תאריך יעד — עד מתי הכל אמור להיות מוכן</label><input id="nTarget" type="date"></div>
+    </div>
+    <div class="sub hidden" id="nSuggest"></div>
+    <div><label>הערות</label><input id="nNotes" placeholder="לא חובה"></div>
+    <div id="nLines" style="display:flex;flex-direction:column;gap:8px;"></div>
+    <button type="button" class="btn-add" id="nAddLine">+ הוסף פריט</button>
+    <div style="display:flex;justify-content:flex-end;"><button type="submit" class="btn-primary">צור הזמנה והדפס מדבקה לכל פריט</button></div>
+    <div class="msg" id="nMsg"></div>
+  </form>
+
+  <!-- הזמנה -->
+  <div id="detailPanel" class="card hidden">
+    <div class="top-bar">
+      <b id="dTitle"></b>
+      <button type="button" class="btn-ghost btn-small" id="dBack">← חזרה לרשימה</button>
+    </div>
+    <div class="grid2">
+      <div><label>שם פרטי</label><input id="dFirst"></div>
+      <div><label>שם משפחה</label><input id="dLast"></div>
+    </div>
+    <div class="grid2">
+      <div><label>טלפון</label><input id="dPhone" type="tel" inputmode="numeric"></div>
+      <div><label>תאריך יעד</label><input id="dTarget" type="date"></div>
+    </div>
+    <div><label>הערות</label><input id="dNotes"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button type="button" class="btn-primary" id="dSave">שמור פרטים</button>
+      <button type="button" class="btn-ok" id="dSupplyAll">✓ סמן את כל ההזמנה כסופקה</button>
+      <button type="button" class="btn-ghost" id="dReprintAll">🖨️ הדפס את כל המדבקות</button>
+    </div>
+    <div class="msg" id="dMsg"></div>
+    <b style="font-size:14px;">פריטים</b>
+    <div id="dLines" style="display:flex;flex-direction:column;gap:8px;"></div>
+    <details>
+      <summary style="cursor:pointer;font-weight:600;color:var(--accent);">+ הוסף פריט להזמנה</summary>
+      <div id="dAddLine" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;"></div>
+      <button type="button" class="btn-add" id="dAddLineBtn" style="margin-top:8px;">הוסף פריט והדפס מדבקה</button>
+    </details>
+    <details>
+      <summary style="cursor:pointer;font-weight:600;color:var(--accent);">🕘 היסטוריה</summary>
+      <div class="events" id="dEvents" style="margin-top:8px;"></div>
+    </details>
+    <div style="display:flex;justify-content:flex-end;"><button type="button" class="btn-danger" id="dDelete">מחק הזמנה</button></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+let META = { product_types: [], statuses: [] };
+let currentTab = 'active';
+let openOrder = null;
+
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fullName(c){ return [c.first_name, c.last_name].filter(Boolean).join(' '); }
+async function api(path, opts){
+  const res = await fetch('/api/items' + path, opts && opts.body ? { ...opts, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(opts.body) } : opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'שגיאה');
+  return data;
+}
+function fmtDate(d){ return d ? d.split('-').reverse().join('.') : ''; }
+// טלפון — אותו נרמול/בדיקה כמו בשרת (lib/phone.js)
+function normalizePhone(v){
+  let d = String(v || '').replace(/\D/g, '');
+  if (d.startsWith('972')) d = '0' + d.slice(3);
+  else if (/^[5-9]\d{8}$/.test(d) || /^[2-4]\d{7}$/.test(d)) d = '0' + d;
+  return d;
+}
+function isValidPhone(d){ return /^0[57]\d{8}$/.test(d) || /^0[23489]\d{7}$/.test(d); }
+function checkPhone(el, msgEl){
+  el.value = normalizePhone(el.value);
+  const ok = isValidPhone(el.value);
+  el.classList.toggle('invalid', !ok);
+  if (!ok) { msgEl.className = 'msg err'; msgEl.textContent = 'מספר טלפון לא תקין — נייד: 10 ספרות שמתחילות ב-05 (או 07), קווי: 9 ספרות.'; el.focus(); }
+  return ok;
+}
+['nPhone', 'dPhone'].forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener('blur', () => { if (!el.value.trim()) return; el.value = normalizePhone(el.value); el.classList.toggle('invalid', !isValidPhone(el.value)); });
+  el.addEventListener('input', () => el.classList.remove('invalid'));
+});
+
+const activeTypes = () => META.product_types.filter(t => t.active);
+const activeStatuses = () => META.statuses.filter(s => s.active);
+function typeOptions(selected){
+  const list = META.product_types.filter(t => t.active || t.id === selected);
+  return '<option value="">סוג מוצר…</option>' + list.map(t => '<option value="' + t.id + '"' + (t.id === selected ? ' selected' : '') + '>' + esc(t.name) + '</option>').join('');
+}
+function statusOptions(selected){
+  const list = META.statuses.filter(s => s.active || s.id === selected);
+  return list.map(s => '<option value="' + s.id + '"' + (s.id === selected ? ' selected' : '') + '>' + esc(s.name) + '</option>').join('');
+}
+
+// דחיפות לפי תאריך יעד: באיחור (אדום) / עד 3 ימים (כתום) / רחוק
+function dueInfo(o){
+  if (!o.target_date) return { cls: '', html: '' };
+  const d = o.days_left;
+  if (o.supplied_at) return { cls: '', html: '<span class="due later">יעד ' + fmtDate(o.target_date) + '</span>' };
+  if (d < 0) return { cls: 'overdue', html: '<span class="due overdue">באיחור ' + (-d) + ' ימים · ' + fmtDate(o.target_date) + '</span>' };
+  if (d === 0) return { cls: 'overdue', html: '<span class="due overdue">להיום! · ' + fmtDate(o.target_date) + '</span>' };
+  if (d <= 3) return { cls: 'soon', html: '<span class="due soon">בעוד ' + d + (d === 1 ? ' יום' : ' ימים') + ' · ' + fmtDate(o.target_date) + '</span>' };
+  return { cls: '', html: '<span class="due later">יעד ' + fmtDate(o.target_date) + '</span>' };
+}
+
+async function loadMeta(){
+  META = await api('/meta');
+  const sf = document.getElementById('statusFilter');
+  const keep = sf.value;
+  sf.innerHTML = '<option value="">כל המצבים</option>' + META.statuses.map(s => '<option value="' + s.id + '">יש פריט במצב: ' + esc(s.name) + '</option>').join('');
+  sf.value = keep;
+  renderScanStatuses();
+}
+
+// --- רשימה ---
+async function loadList(){
+  const list = document.getElementById('ordersList');
+  const count = document.getElementById('listCount');
+  count.textContent = 'טוען…';
+  const params = new URLSearchParams({ state: currentTab === 'supplied' ? 'supplied' : 'active' });
+  const q = document.getElementById('search').value.trim();
+  if (q) params.set('q', q);
+  if (document.getElementById('statusFilter').value) params.set('status_id', document.getElementById('statusFilter').value);
+  try {
+    const { orders } = await api('/orders?' + params);
+    count.textContent = orders.length + ' הזמנות' + (currentTab === 'active' ? ' · ממוין לפי תאריך יעד (הדחוף למעלה)' : '');
+    list.innerHTML = orders.map(o => {
+      const due = dueInfo(o);
+      // סיכום מצבים: כמה פריטים בכל מצב
+      const counts = new Map();
+      o.lines.forEach(l => { const k = l.status_id; counts.set(k, { n: (counts.get(k)?.n || 0) + 1, l }); });
+      const chips = [...counts.values()].map(({ n, l }) => '<span class="chip' + (l.is_final ? ' final' : l.is_ready ? ' ready' : '') + '">' + esc(l.status) + (n > 1 ? ' ×' + n : '') + '</span>').join('');
+      const allReady = o.lines.length && !o.supplied_at && o.lines.every(l => l.is_ready || l.is_final);
+      const items = o.lines.map(l => [l.product_type, l.description].filter(Boolean).join(' — ') + (l.quantity > 1 ? ' ×' + l.quantity : '')).join(' · ');
+      return '<div class="order-card ' + due.cls + '" data-n="' + o.order_number + '">' +
+        '<div class="oc-head"><div><b>#' + o.order_number + ' · ' + esc(fullName(o)) + '</b> <span class="sub">' + esc(o.phone) + '</span></div>' + due.html + '</div>' +
+        '<div class="sub">' + esc(items) + '</div>' +
+        '<div class="chips">' + (allReady ? '<span class="badge-ready">✓ הכל מוכן לאיסוף</span>' : '') + chips +
+        (o.supplied_at ? '<span class="chip final">סופקה ' + new Date(o.supplied_at).toLocaleDateString('he-IL') + '</span>' : '') + '</div>' +
+        '</div>';
+    }).join('') || '<div class="sub" style="text-align:center;padding:20px;">אין הזמנות</div>';
+    list.querySelectorAll('.order-card').forEach(c => c.addEventListener('click', () => openDetail(c.dataset.n)));
+  } catch (err) { count.textContent = 'שגיאה: ' + err.message; }
+}
+document.getElementById('search').addEventListener('input', () => {
+  document.getElementById('searchClear').classList.toggle('hidden', !document.getElementById('search').value);
+  clearTimeout(window._sd); window._sd = setTimeout(loadList, 350);
+});
+document.getElementById('searchClear').addEventListener('click', () => {
+  document.getElementById('search').value = ''; document.getElementById('searchClear').classList.add('hidden'); loadList();
+});
+document.getElementById('statusFilter').addEventListener('change', loadList);
+
+function showTab(tab){
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.getElementById('newPanel').classList.toggle('hidden', tab !== 'new');
+  document.getElementById('listPanel').classList.toggle('hidden', tab === 'new');
+  document.getElementById('detailPanel').classList.add('hidden');
+  if (tab !== 'new') {
+    // חזרה לרשימה מלשונית אחרת — מאפסים חיפוש ומסנן
+    document.getElementById('search').value = ''; document.getElementById('searchClear').classList.add('hidden');
+    document.getElementById('statusFilter').value = '';
+    loadList();
+  } else if (!document.querySelector('#nLines .line')) addNewLine();
+}
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab)));
+
+// --- הזמנה חדשה ---
+function lineFormHtml(withStatus){
+  return '<div class="line"><div class="line-head"><b class="sub" style="font-weight:700;">פריט</b>' +
+    '<button type="button" class="btn-danger rmLine">הסר</button></div>' +
+    '<div class="line-grid"><select class="lType">' + typeOptions(null) + '</select>' +
+    '<input class="lDesc desc" placeholder="תיאור (מידה, צבע, רקמה…)">' +
+    '<input class="lQty" type="number" min="1" value="1" inputmode="numeric" title="כמות"></div>' +
+    (withStatus ? '<div><label>מצב התחלתי</label><select class="lStatus">' + statusOptions(activeStatuses()[0]?.id) + '</select></div>' : '') + '</div>';
+}
+function addNewLine(){
+  const box = document.getElementById('nLines');
+  box.insertAdjacentHTML('beforeend', lineFormHtml(true));
+  const el = box.lastElementChild;
+  el.querySelector('.rmLine').onclick = () => { el.remove(); if (!box.children.length) addNewLine(); };
+}
+document.getElementById('nAddLine').addEventListener('click', addNewLine);
+function readLine(el){
+  return {
+    product_type_id: el.querySelector('.lType').value || null,
+    description: el.querySelector('.lDesc').value.trim(),
+    quantity: +el.querySelector('.lQty').value || 1,
+    status_id: el.querySelector('.lStatus') ? +el.querySelector('.lStatus').value : undefined,
+  };
+}
+// מילוי שם לפי טלפון של לקוח קיים
+let lastLookup = '';
+document.getElementById('nPhone').addEventListener('input', async () => {
+  const d = normalizePhone(document.getElementById('nPhone').value);
+  const sug = document.getElementById('nSuggest');
+  if (!isValidPhone(d) || d === lastLookup) return;
+  lastLookup = d;
+  try {
+    const res = await fetch('/api/orders/customer-lookup?phone=' + encodeURIComponent(d));
+    const data = await res.json();
+    const c = data.customer || data;
+    if (res.ok && c && (c.first_name || c.last_name)) {
+      if (!document.getElementById('nFirst').value && !document.getElementById('nLast').value) {
+        document.getElementById('nFirst').value = c.first_name || '';
+        document.getElementById('nLast').value = c.last_name || '';
+      }
+      sug.textContent = '✓ לקוח קיים: ' + fullName(c);
+      sug.classList.remove('hidden');
+    } else sug.classList.add('hidden');
+  } catch (e) {}
+});
+document.getElementById('newPanel').addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = document.getElementById('nMsg');
+  msg.className = 'msg';
+  if (!document.getElementById('nFirst').value.trim() && !document.getElementById('nLast').value.trim()) {
+    msg.className = 'msg err'; msg.textContent = 'צריך שם פרטי או שם משפחה.'; return;
+  }
+  if (!checkPhone(document.getElementById('nPhone'), msg)) return;
+  const lines = [...document.querySelectorAll('#nLines .line')].map(readLine);
+  const bad = lines.findIndex(l => !l.product_type_id && !l.description);
+  if (bad >= 0) { msg.className = 'msg err'; msg.textContent = 'פריט ' + (bad + 1) + ': צריך לבחור סוג מוצר או לכתוב תיאור.'; return; }
+  try {
+    const data = await api('/orders', { method: 'POST', body: {
+      customer: { first_name: document.getElementById('nFirst').value.trim(), last_name: document.getElementById('nLast').value.trim(), phone: document.getElementById('nPhone').value },
+      target_date: document.getElementById('nTarget').value || null,
+      notes: document.getElementById('nNotes').value.trim(),
+      lines,
+    }});
+    msg.className = 'msg ok';
+    msg.textContent = 'הזמנה #' + data.order_number + ' נוצרה — ' + data.item_codes.length + ' מדבקות נשלחו להדפסה (' + data.item_codes.join(' · ') + ')';
+    e.target.reset(); lastLookup = '';
+    document.getElementById('nSuggest').classList.add('hidden');
+    document.getElementById('nLines').innerHTML = ''; addNewLine();
+  } catch (err) { msg.className = 'msg err'; msg.textContent = err.message; }
+});
+
+// --- הזמנה (פרטים, פריטים, היסטוריה) ---
+const EVENT_LABELS = { order_created: 'נוצרה', order_edited: 'נערכה', line_added: 'נוסף פריט', line_deleted: 'נמחק פריט', line_edited: 'פריט נערך', status_changed: 'מצב', label_reprinted: 'הודפסה מדבקה', print_failed: '⚠️ הדפסה נכשלה' };
+async function openDetail(n){
+  try {
+    const o = await api('/orders/' + encodeURIComponent(n));
+    openOrder = o;
+    document.getElementById('listPanel').classList.add('hidden');
+    document.getElementById('newPanel').classList.add('hidden');
+    document.getElementById('detailPanel').classList.remove('hidden');
+    document.getElementById('dMsg').className = 'msg';
+    document.getElementById('dTitle').textContent = 'הזמנה #' + o.order_number + ' · ' + (o.created_at_hebrew || '') + (o.supplied_at ? ' · סופקה' : '');
+    document.getElementById('dFirst').value = o.first_name || '';
+    document.getElementById('dLast').value = o.last_name || '';
+    document.getElementById('dPhone').value = o.phone || '';
+    document.getElementById('dTarget').value = o.target_date || '';
+    document.getElementById('dNotes').value = o.notes || '';
+    const linesBox = document.getElementById('dLines');
+    linesBox.innerHTML = o.lines.map(l =>
+      '<div class="line" data-code="' + l.item_code + '"><div class="line-head"><b>' + l.item_code + ' · פריט ' + l.line_no + '</b>' +
+      '<div style="display:flex;gap:6px;"><button type="button" class="btn-ghost btn-small reprint">🖨️ מדבקה</button><button type="button" class="btn-danger del">מחק</button></div></div>' +
+      '<div class="line-grid"><select class="lType">' + typeOptions(l.product_type_id) + '</select>' +
+      '<input class="lDesc desc" value="' + esc(l.description || '') + '" placeholder="תיאור">' +
+      '<input class="lQty" type="number" min="1" value="' + l.quantity + '"></div>' +
+      '<select class="status">' + statusOptions(l.status_id) + '</select>' +
+      '<div class="sub">במצב הזה מאז ' + new Date(l.status_changed_at).toLocaleString('he-IL') + '</div></div>'
+    ).join('') || '<div class="sub">אין פריטים</div>';
+    linesBox.querySelectorAll('.line').forEach(el => {
+      const code = el.dataset.code;
+      // שינוי מצב — נשמר מיד
+      el.querySelector('.status').addEventListener('change', async e => {
+        try { await api('/lines/' + code, { method: 'PUT', body: { status_id: +e.target.value } }); openDetail(o.order_number); }
+        catch (err) { alert(err.message); }
+      });
+      // שינוי סוג/תיאור/כמות — נשמר ביציאה מהשדה
+      ['lType', 'lDesc', 'lQty'].forEach(cls => el.querySelector('.' + cls).addEventListener('change', async () => {
+        const v = readLine(el);
+        try { await api('/lines/' + code, { method: 'PUT', body: { product_type_id: v.product_type_id, description: v.description, quantity: v.quantity } }); }
+        catch (err) { alert(err.message); }
+      }));
+      el.querySelector('.reprint').onclick = async () => { try { await api('/lines/' + code + '/reprint', { method: 'POST' }); alert('המדבקה נשלחה להדפסה'); } catch (err) { alert(err.message); } };
+      el.querySelector('.del').onclick = async () => {
+        if (!confirm('למחוק את פריט ' + code + '?')) return;
+        try { await api('/lines/' + code, { method: 'DELETE' }); openDetail(o.order_number); } catch (err) { alert(err.message); }
+      };
+    });
+    const add = document.getElementById('dAddLine');
+    add.innerHTML = lineFormHtml(true);
+    add.querySelector('.rmLine').remove();
+    document.getElementById('dEvents').innerHTML = o.events.map(ev =>
+      '<div><b>' + esc(EVENT_LABELS[ev.action] || ev.action) + '</b>' + (ev.item_code ? ' · ' + ev.item_code : '') + (ev.detail ? ' · ' + esc(ev.detail) : '') +
+      ' <span class="sub">' + new Date(ev.created_at).toLocaleString('he-IL') + '</span></div>').join('') || '<div class="sub">אין</div>';
+  } catch (err) { alert(err.message); }
+}
+function closeDetail(){
+  openOrder = null;
+  document.getElementById('detailPanel').classList.add('hidden');
+  document.getElementById('listPanel').classList.remove('hidden');
+  loadList();
+}
+document.getElementById('dBack').addEventListener('click', closeDetail);
+document.getElementById('dSave').addEventListener('click', async () => {
+  const msg = document.getElementById('dMsg');
+  msg.className = 'msg';
+  if (!document.getElementById('dFirst').value.trim() && !document.getElementById('dLast').value.trim()) { msg.className = 'msg err'; msg.textContent = 'צריך שם פרטי או שם משפחה.'; return; }
+  if (!checkPhone(document.getElementById('dPhone'), msg)) return;
+  try {
+    await api('/orders/' + openOrder.order_number, { method: 'PUT', body: {
+      customer: { first_name: document.getElementById('dFirst').value.trim(), last_name: document.getElementById('dLast').value.trim(), phone: document.getElementById('dPhone').value },
+      target_date: document.getElementById('dTarget').value || null,
+      notes: document.getElementById('dNotes').value,
+    }});
+    closeDetail();
+  } catch (err) { msg.className = 'msg err'; msg.textContent = err.message; }
+});
+document.getElementById('dSupplyAll').addEventListener('click', async () => {
+  if (!confirm('לסמן את כל הפריטים בהזמנה #' + openOrder.order_number + ' כסופקו?')) return;
+  try { await api('/orders/' + openOrder.order_number + '/supply-all', { method: 'POST' }); closeDetail(); } catch (err) { alert(err.message); }
+});
+document.getElementById('dReprintAll').addEventListener('click', async () => {
+  try { const r = await api('/orders/' + openOrder.order_number + '/reprint', { method: 'POST' }); alert(r.count + ' מדבקות נשלחו להדפסה'); } catch (err) { alert(err.message); }
+});
+document.getElementById('dAddLineBtn').addEventListener('click', async () => {
+  const v = readLine(document.querySelector('#dAddLine .line'));
+  if (!v.product_type_id && !v.description) { alert('צריך לבחור סוג מוצר או לכתוב תיאור'); return; }
+  try { await api('/orders/' + openOrder.order_number + '/lines', { method: 'POST', body: v }); openDetail(openOrder.order_number); } catch (err) { alert(err.message); }
+});
+document.getElementById('dDelete').addEventListener('click', async () => {
+  if (!confirm('למחוק את הזמנה #' + openOrder.order_number + ' וכל הפריטים שלה? אי אפשר לבטל.')) return;
+  try { await api('/orders/' + openOrder.order_number, { method: 'DELETE' }); closeDetail(); } catch (err) { alert(err.message); }
+});
+
+// --- סריקה מהירה ---
+let scanStatusId = null;
+function renderScanStatuses(){
+  const box = document.getElementById('scanStatuses');
+  box.innerHTML = activeStatuses().map(s => '<button type="button" data-id="' + s.id + '"' + (s.id === scanStatusId ? ' class="active"' : '') + '>' + esc(s.name) + '</button>').join('');
+  box.querySelectorAll('button').forEach(b => b.onclick = () => {
+    scanStatusId = +b.dataset.id; renderScanStatuses(); document.getElementById('scanInput').focus();
+  });
+}
+document.getElementById('scanToggle').addEventListener('click', () => {
+  const p = document.getElementById('scanPanel');
+  p.classList.toggle('hidden');
+  document.body.classList.toggle('scan-on', !p.classList.contains('hidden'));
+  if (!p.classList.contains('hidden')) { document.getElementById('scanLog').innerHTML = ''; document.getElementById('scanInput').focus(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+  else stopCamera();
+});
+document.getElementById('scanClose').addEventListener('click', () => document.getElementById('scanToggle').click());
+
+let audioCtx = null;
+function beep(freq, dur, delay, type, vol){
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain(), t = audioCtx.currentTime + (delay || 0);
+    o.type = type || 'sine'; o.frequency.value = freq; o.connect(g); g.connect(audioCtx.destination);
+    g.gain.setValueAtTime(vol || 0.2, t); g.gain.setValueAtTime(0, t + dur); o.start(t); o.stop(t + dur + 0.02);
+  } catch (e) {}
+}
+const beepOk = () => beep(880, 0.15);
+const beepError = () => { for (let i = 0; i < 6; i++) beep(i % 2 ? 440 : 620, 0.2, i * 0.2, 'square', 0.35); };
+let flashTimer;
+function flash(kind, text){
+  const el = document.getElementById('scanFlash');
+  el.className = kind + ' show'; el.textContent = text;
+  clearTimeout(flashTimer); flashTimer = setTimeout(() => el.classList.remove('show'), 5000);
+}
+function addLog(kind, title, detail){
+  const el = document.createElement('div');
+  el.className = 'entry ' + kind;
+  el.innerHTML = '<b></b><div class="d"></div>';
+  el.querySelector('b').textContent = title; el.querySelector('.d').textContent = detail || '';
+  document.getElementById('scanLog').prepend(el);
+}
+const recentScans = new Map();
+async function processScan(code){
+  code = String(code || '').trim();
+  if (!code) return;
+  if (!scanStatusId) { addLog('warn', code, 'קודם בוחרים לאיזה מצב לעדכן'); flash('warn', 'בחר מצב יעד לפני הסריקה'); beepError(); return; }
+  // אותו קוד שוב תוך 3 שניות (מצלמה) — מתעלמים
+  if (recentScans.has(code) && Date.now() - recentScans.get(code) < 3000) return;
+  recentScans.set(code, Date.now());
+  try {
+    const r = await api('/scan', { method: 'POST', body: { code, status_id: scanStatusId, whole_order: document.getElementById('scanWholeOrder').checked } });
+    const who = '#' + r.order_number + ' · ' + fullName(r.customer);
+    const what = r.total > 1 ? 'כל ההזמנה (' + r.total + ' פריטים)' : (r.items[0].text || r.items[0].item_code);
+    addLog('ok', who + ' → ' + r.status, what + (r.changed < r.total ? ' · ' + (r.total - r.changed) + ' כבר היו במצב הזה' : ''));
+    flash('ok', '✓ ' + who + ' — ' + what + ' → ' + r.status);
+    beepOk();
+    if (!document.getElementById('listPanel').classList.contains('hidden')) loadList();
+    else if (openOrder && openOrder.order_number === r.order_number) openDetail(r.order_number);
+  } catch (err) {
+    addLog('warn', code, err.message); flash('warn', code + ' — ' + err.message); beepError();
+  }
+}
+document.getElementById('scanInput').addEventListener('keydown', async e => {
+  if (e.key !== 'Enter') return;
+  const v = e.target.value; e.target.value = '';
+  await processScan(v);
+  e.target.focus();
+});
+let qr = null, camOn = false;
+async function startCamera(){
+  const box = document.getElementById('cameraReader');
+  box.classList.remove('hidden');
+  qr = new Html5Qrcode('cameraReader', { formatsToSupport: [Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.QR_CODE], verbose: false });
+  try {
+    await qr.start({ facingMode: 'environment' }, {
+      fps: 15,
+      qrbox: (w, h) => ({ width: Math.max(80, Math.min(280, Math.floor(w * 0.9))), height: Math.max(60, Math.min(140, Math.floor(h * 0.6))) }),
+      videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+    }, txt => processScan(txt), () => {});
+    camOn = true; document.getElementById('cameraBtn').textContent = '⏹ עצור מצלמה';
+  } catch (err) {
+    addLog('warn', 'מצלמה', 'לא הצלחתי לפתוח מצלמה: ' + (err?.message || err)); box.classList.add('hidden');
+  }
+}
+async function stopCamera(){
+  if (!camOn || !qr) return;
+  try { await qr.stop(); qr.clear(); } catch (e) {}
+  camOn = false; document.getElementById('cameraReader').classList.add('hidden');
+  document.getElementById('cameraBtn').textContent = '📷 מצלמה';
+}
+document.getElementById('cameraBtn').addEventListener('click', () => camOn ? stopCamera() : startCamera());
+window.addEventListener('pagehide', stopCamera);
+
+(async () => {
+  try { await loadMeta(); } catch (e) {}
+  // ?scan=1 — פתיחה ישר במצב סריקה מהירה
+  if (new URLSearchParams(location.search).get('scan') === '1') document.getElementById('scanToggle').click();
+  loadList();
+})();
+</script>
+</body>
+</html>
