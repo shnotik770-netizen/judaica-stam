@@ -280,3 +280,5 @@ create table if not exists item_events (
   created_at timestamptz not null default now()
 );
 create index if not exists idx_item_events_order on item_events(item_order_id);
+-- שם הפריט (שדה חופשי) — בנוסף לסוג (מהרשימה); description = הערות / הסבר
+alter table item_order_lines add column if not exists item_name text;

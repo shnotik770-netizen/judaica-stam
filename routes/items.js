@@ -105,14 +105,13 @@ const LINE_SELECT = `
   join item_statuses s on s.id = l.status_id
   left join product_types pt on pt.id = l.product_type_id`;
 
+// מדבקה: מספר הזמנה ופריט, לקוח, ושורת פריט — סוג + שם בלבד (בלי הערות, יעד ותאריך)
+const lineText = (l) => [l.product_type, l.item_name].filter(Boolean).join(" — ");
 function printLineLabel(l) {
-  const item = [l.product_type, l.description].filter(Boolean).join(" — ") + (l.quantity > 1 ? ` ×${l.quantity}` : "");
   const text = [
     `הזמנה ${l.order_number} | פריט ${l.line_no}/${l.line_count}`,
     `${fullName(l)} · ${l.phone}`,
-    item || "פריט",
-    ...(l.target_date ? [`יעד: ${l.target_date.split("-").reverse().join(".")}`] : []),
-    toHebrewDate(l.order_created_at || new Date()),
+    lineText(l) || "פריט",
   ].join("\n");
   enqueuePrint({ text, barcode: l.item_code, copies: 1 }).catch((e) => {
     console.error("enqueuePrint failed", l.item_code, e.message);
@@ -125,11 +124,12 @@ function cleanLines(lines) {
   if (!Array.isArray(lines) || lines.length === 0) return { error: "צריך לפחות פריט אחד" };
   const out = [];
   for (const [i, l] of lines.entries()) {
-    const description = String(l?.description || "").trim().slice(0, 300);
+    const description = String(l?.description || "").trim().slice(0, 1000); // הערות / הסבר
+    const item_name = String(l?.item_name || "").trim().slice(0, 200);
     const product_type_id = l?.product_type_id ? +l.product_type_id : null;
-    if (!product_type_id && !description) return { error: `פריט ${i + 1}: צריך לבחור סוג מוצר או לכתוב תיאור` };
+    if (!product_type_id && !item_name) return { error: `פריט ${i + 1}: צריך לבחור סוג פריט או לכתוב שם פריט` };
     const quantity = Math.max(1, Math.min(999, parseInt(l?.quantity, 10) || 1));
-    out.push({ description: description || null, product_type_id, quantity, status_id: l?.status_id ? +l.status_id : null });
+    out.push({ description: description || null, item_name: item_name || null, product_type_id, quantity, status_id: l?.status_id ? +l.status_id : null });
   }
   return { lines: out };
 }
@@ -162,18 +162,13 @@ async function insertLines(client, order, lines, startNo) {
   for (const [i, l] of lines.entries()) {
     const no = startNo + i;
     const { rows } = await client.query(
-      `insert into item_order_lines (item_order_id, line_no, item_code, product_type_id, description, quantity, status_id)
-       values ($1,$2,$3,$4,$5,$6,$7) returning id, item_code`,
-      [order.id, no, lineCode(order.order_number, no), l.product_type_id, l.description, l.quantity, l.status_id || defaultStatus]
+      `insert into item_order_lines (item_order_id, line_no, item_code, product_type_id, item_name, description, quantity, status_id)
+       values ($1,$2,$3,$4,$5,$6,$7,$8) returning id, item_code`,
+      [order.id, no, lineCode(order.order_number, no), l.product_type_id, l.item_name, l.description, l.quantity, l.status_id || defaultStatus]
     );
     created.push(rows[0]);
   }
   return created;
-}
-
-async function printLines(codes) {
-  const { rows } = await pool.query(LINE_SELECT + " where l.item_code = any($1) order by l.line_no", [codes]);
-  rows.forEach(printLineLabel);
 }
 
 router.post("/orders", asyncHandler(async (req, res) => {
@@ -202,7 +197,7 @@ router.post("/orders", asyncHandler(async (req, res) => {
   } finally {
     client.release();
   }
-  printLines(created.map((c) => c.item_code));
+  // המדבקות לא מודפסות אוטומטית — הדף שואל אילו להדפיס (POST /orders/:n/print-labels)
   res.json({ order_number: order.order_number, item_codes: created.map((c) => c.item_code) });
 }));
 
@@ -219,7 +214,7 @@ router.get("/orders", asyncHandler(async (req, res) => {
     const i = params.length;
     conds.push(`(o.order_number ilike $${i} or c.first_name ilike $${i} or c.last_name ilike $${i} or c.phone ilike $${i}
       or exists (select 1 from item_order_lines l2 left join product_types p2 on p2.id = l2.product_type_id
-                 where l2.item_order_id = o.id and (l2.item_code ilike $${i} or l2.description ilike $${i} or p2.name ilike $${i})))`);
+                 where l2.item_order_id = o.id and (l2.item_code ilike $${i} or l2.item_name ilike $${i} or l2.description ilike $${i} or p2.name ilike $${i})))`);
   }
   if (req.query.status_id) {
     params.push(+req.query.status_id);
@@ -229,7 +224,7 @@ router.get("/orders", asyncHandler(async (req, res) => {
     `select o.order_number, o.target_date, o.notes, o.supplied_at, o.created_at, c.first_name, c.last_name, c.phone,
             (o.target_date - (now() at time zone 'Asia/Jerusalem')::date) as days_left,
             coalesce(json_agg(json_build_object('item_code', l.item_code, 'line_no', l.line_no, 'product_type', pt.name,
-              'description', l.description, 'quantity', l.quantity, 'status_id', l.status_id, 'status', s.name,
+              'item_name', l.item_name, 'description', l.description, 'quantity', l.quantity, 'status_id', l.status_id, 'status', s.name,
               'is_ready', s.is_ready, 'is_final', s.is_final) order by l.line_no) filter (where l.id is not null), '[]') as lines
      from item_orders o
      join customers c on c.id = o.customer_id
@@ -328,7 +323,6 @@ router.post("/orders/:n/lines", asyncHandler(async (req, res) => {
   const created = await insertLines(pool, order, cl.lines, next);
   await pool.query("update item_orders set supplied_at = null, updated_at = now() where id = $1", [order.id]);
   await logEvent(pool, order.id, created[0], "line_added", null);
-  printLines(created.map((c) => c.item_code));
   res.json({ item_code: created[0].item_code });
 }));
 
@@ -369,7 +363,8 @@ router.put("/lines/:code", asyncHandler(async (req, res) => {
     if (req.body?.status_id) await setLineStatus(client, line, +req.body.status_id);
     const sets = [], params = [line.id], changes = [];
     if (req.body?.product_type_id !== undefined) { params.push(req.body.product_type_id ? +req.body.product_type_id : null); sets.push(`product_type_id = $${params.length}`); changes.push("סוג"); }
-    if (req.body?.description !== undefined) { params.push(String(req.body.description || "").trim().slice(0, 300) || null); sets.push(`description = $${params.length}`); changes.push("תיאור"); }
+    if (req.body?.item_name !== undefined) { params.push(String(req.body.item_name || "").trim().slice(0, 200) || null); sets.push(`item_name = $${params.length}`); changes.push("שם"); }
+    if (req.body?.description !== undefined) { params.push(String(req.body.description || "").trim().slice(0, 300) || null); sets.push(`description = $${params.length}`); changes.push("הערות"); }
     if (req.body?.quantity !== undefined) { params.push(Math.max(1, parseInt(req.body.quantity, 10) || 1)); sets.push(`quantity = $${params.length}`); changes.push("כמות"); }
     if (sets.length) {
       await client.query(`update item_order_lines set ${sets.join(", ")} where id = $1`, params);
@@ -391,7 +386,7 @@ router.delete("/lines/:code", asyncHandler(async (req, res) => {
   const line = await loadLine(req.params.code);
   if (!line) { res.status(404).json({ error: "פריט לא נמצא" }); return; }
   await pool.query("delete from item_order_lines where id = $1", [line.id]);
-  await logEvent(pool, line.order_id, { item_code: line.item_code }, "line_deleted", [line.product_type, line.description].filter(Boolean).join(" — "));
+  await logEvent(pool, line.order_id, { item_code: line.item_code }, "line_deleted", lineText(line));
   await syncSupplied(pool, line.order_id);
   res.json({ ok: true });
 }));
@@ -455,7 +450,7 @@ router.post("/scan", asyncHandler(async (req, res) => {
   res.json({
     ok: true, changed, total: lines.length, status: status.name,
     order_number: l0.order_number, customer: { first_name: l0.first_name, last_name: l0.last_name },
-    items: lines.map((l) => ({ item_code: l.item_code, text: [l.product_type, l.description].filter(Boolean).join(" — "), was: l.status })),
+    items: lines.map((l) => ({ item_code: l.item_code, text: lineText(l), was: l.status })),
   });
 }));
 
@@ -465,6 +460,30 @@ router.post("/lines/:code/reprint", asyncHandler(async (req, res) => {
   printLineLabel(line);
   await logEvent(pool, line.order_id, line, "label_reprinted", null);
   res.json({ ok: true });
+}));
+
+// הדפסת מדבקות לפריטים שנבחרו (item_codes; בלי — כולם)
+router.post("/orders/:n/print-labels", asyncHandler(async (req, res) => {
+  const order = await loadOrder(req.params.n);
+  if (!order) { res.status(404).json({ error: "הזמנה לא נמצאה" }); return; }
+  const codes = Array.isArray(req.body?.item_codes) ? req.body.item_codes.map(String) : null;
+  const { rows } = await pool.query(
+    LINE_SELECT + " where o.id = $1" + (codes ? " and l.item_code = any($2)" : "") + " order by l.line_no",
+    codes ? [order.id, codes] : [order.id]
+  );
+  rows.forEach(printLineLabel);
+  if (rows.length) await logEvent(pool, order.id, null, "label_reprinted", rows.map((r) => r.item_code).join(", "));
+  res.json({ ok: true, count: rows.length });
+}));
+
+// זיהוי קוד שנסרק: קוד פריט (7 ספרות) או מספר הזמנה (5 ספרות)
+router.get("/lookup/:code", asyncHandler(async (req, res) => {
+  const code = String(req.params.code || "").trim();
+  const line = await loadLine(code);
+  if (line) { res.json({ order_number: line.order_number, item_code: line.item_code }); return; }
+  const order = await loadOrder(code);
+  if (order) { res.json({ order_number: order.order_number, item_code: null }); return; }
+  res.status(404).json({ error: "קוד לא מוכר" });
 }));
 
 router.post("/orders/:n/reprint", asyncHandler(async (req, res) => {
