@@ -106,6 +106,11 @@
   .mini-lines{font-size:12.5px;display:flex;flex-direction:column;gap:3px;}
   .mini-lines div{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid var(--border);padding:3px 0;}
   .mini-lines div.me{font-weight:800;}
+  .pay-box{border:1px solid var(--border);border-radius:11px;padding:12px;display:flex;flex-direction:column;gap:8px;background:var(--surface-2);}
+  .pay-form{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;}
+  @media (max-width:480px){.pay-form{grid-template-columns:1fr 1fr;} .pay-form button{grid-column:1 / -1;}}
+  .pay-row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;background:var(--surface);border-radius:8px;padding:6px 10px;}
+  .chip.due{background:var(--danger-soft);color:var(--danger);}
   /* ניהול רשימות (מוצג גם בדף הניהול של החנות) */
   .admin-list{display:flex;flex-direction:column;gap:6px;}
   .admin-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
@@ -169,6 +174,10 @@
     </div>
     <div class="sub hidden" id="nSuggest"></div>
     <div><label>הערות</label><input id="nNotes" placeholder="לא חובה"></div>
+    <div class="grid2">
+      <div><label>💰 סכום לתשלום — כמה הלקוח אמור לשלם (₪)</label><input id="nPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="לא חובה"></div>
+      <div><label>💵 שולם בפועל עכשיו (₪)</label><input id="nPaid" type="number" min="0" step="0.01" inputmode="decimal" placeholder="לא חובה"></div>
+    </div>
     <div id="nLines" style="display:flex;flex-direction:column;gap:8px;"></div>
     <button type="button" class="btn-add" id="nAddLine">+ הוסף פריט</button>
     <div style="display:flex;justify-content:flex-end;"><button type="submit" class="btn-primary">צור הזמנה</button></div>
@@ -190,6 +199,12 @@
       <div><label>תאריך יעד</label><input id="dTarget" type="date"></div>
     </div>
     <div><label>הערות</label><input id="dNotes"></div>
+    <div class="pay-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><b>💰 תשלום</b><span id="dBalance" style="font-weight:700;"></span></div>
+      <div><label>סכום לתשלום (₪) — נשמר ב"שמור פרטים"</label><input id="dPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="לא נרשם"></div>
+      <div id="dPayments" style="display:flex;flex-direction:column;gap:5px;"></div>
+      <div class="pay-form"><input id="dPayAmount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="שולם ₪"><input id="dPayNote" placeholder="הערה (לא חובה)"><button type="button" class="btn-primary" id="dPayAdd">הוסף תשלום</button></div>
+    </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button type="button" class="btn-primary" id="dSave">שמור פרטים</button>
       <button type="button" class="btn-ok" id="dSupplyAll">✓ סמן את כל ההזמנה כסופקה</button>
@@ -225,6 +240,14 @@ async function api(path, opts){
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'שגיאה');
   return data;
+}
+const ils = (n) => '₪' + Number(n || 0).toLocaleString('he-IL', { maximumFractionDigits: 2 });
+// "לתשלום X · שולם Y · נשאר Z" / ✓ שולם במלואו. price=null — רק כמה שולם
+function balanceInfo(price, paid){
+  if (price == null) return paid > 0 ? { text: 'שולם ' + ils(paid), due: false } : null;
+  const left = Math.round((price - paid) * 100) / 100;
+  if (left <= 0) return { text: '✓ שולם במלואו' + (left < 0 ? ' (עודף ' + ils(-left) + ')' : ''), due: false };
+  return { text: 'לתשלום ' + ils(price) + ' · שולם ' + ils(paid) + ' · נשאר ' + ils(left), due: true, left };
 }
 const lineText = (l) => [l.product_type, l.item_name].filter(Boolean).join(' — ');
 // חלון בחירה כללי: html + כפתורים; מחזיר את האלמנט כדי לחבר אירועים
@@ -364,12 +387,14 @@ async function loadList(){
       o.lines.forEach(l => { const k = l.status_id; counts.set(k, { n: (counts.get(k)?.n || 0) + 1, l }); });
       const chips = [...counts.values()].map(({ n, l }) => '<span class="chip' + (l.is_final ? ' final' : l.is_ready ? ' ready' : '') + '">' + esc(l.status) + (n > 1 ? ' ×' + n : '') + '</span>').join('');
       const allReady = o.lines.length && !o.supplied_at && o.lines.every(l => l.is_ready || l.is_final);
+      const bal = balanceInfo(o.price, o.paid_total);
+      const payChip = bal ? '<span class="chip' + (bal.due ? ' due' : ' ready') + '">💰 ' + (bal.due ? 'נשאר לשלם ' + ils(bal.left) : bal.text) + '</span>' : '';
       const items = o.lines.map(lineText).filter(Boolean).join(' · ');
       return '<div class="order-card ' + due.cls + '" data-n="' + o.order_number + '">' +
         '<div class="oc-head"><div><b>#' + o.order_number + ' · ' + esc(fullName(o)) + '</b> <span class="sub">' + esc(o.phone) + '</span></div>' + due.html + '</div>' +
         '<div class="sub">' + esc(items) + '</div>' +
         '<div class="chips">' + (allReady ? '<span class="badge-ready">✓ הכל מוכן לאיסוף</span>' : '') + chips +
-        (o.supplied_at ? '<span class="chip final">סופקה ' + new Date(o.supplied_at).toLocaleDateString('he-IL') + '</span>' : '') + '</div>' +
+        (o.supplied_at ? '<span class="chip final">סופקה ' + new Date(o.supplied_at).toLocaleDateString('he-IL') + '</span>' : '') + payChip + '</div>' +
         '</div>';
     }).join('') || '<div class="sub" style="text-align:center;padding:20px;">אין הזמנות</div>';
     list.querySelectorAll('.order-card').forEach(c => c.addEventListener('click', () => openDetail(c.dataset.n)));
@@ -460,6 +485,8 @@ document.getElementById('newPanel').addEventListener('submit', async e => {
       customer: { first_name: document.getElementById('nFirst').value.trim(), last_name: document.getElementById('nLast').value.trim(), phone: document.getElementById('nPhone').value },
       target_date: document.getElementById('nTarget').value || null,
       notes: document.getElementById('nNotes').value.trim(),
+      price: document.getElementById('nPrice').value === '' ? null : +document.getElementById('nPrice').value,
+      payment: +document.getElementById('nPaid').value > 0 ? { amount: +document.getElementById('nPaid').value } : null,
       lines,
     }});
     msg.className = 'msg ok';
@@ -473,7 +500,7 @@ document.getElementById('newPanel').addEventListener('submit', async e => {
 });
 
 // --- הזמנה (פרטים, פריטים, היסטוריה) ---
-const EVENT_LABELS = { order_created: 'נוצרה', order_edited: 'נערכה', line_added: 'נוסף פריט', line_deleted: 'נמחק פריט', line_edited: 'פריט נערך', status_changed: 'מצב', label_reprinted: 'הודפסה מדבקה', print_failed: '⚠️ הדפסה נכשלה' };
+const EVENT_LABELS = { order_created: 'נוצרה', order_edited: 'נערכה', line_added: 'נוסף פריט', line_deleted: 'נמחק פריט', line_edited: 'פריט נערך', status_changed: 'מצב', label_reprinted: 'הודפסה מדבקה', payment_added: '💰 תשלום', payment_deleted: '💰 תשלום נמחק', print_failed: '⚠️ הדפסה נכשלה' };
 async function openDetail(n){
   try {
     const o = await api('/orders/' + encodeURIComponent(n));
@@ -488,6 +515,17 @@ async function openDetail(n){
     document.getElementById('dPhone').value = o.phone || '';
     document.getElementById('dTarget').value = o.target_date || '';
     document.getElementById('dNotes').value = o.notes || '';
+    document.getElementById('dPrice').value = o.price == null ? '' : o.price;
+    const bal = balanceInfo(o.price, o.paid_total);
+    const balEl = document.getElementById('dBalance');
+    balEl.textContent = bal ? bal.text : ''; balEl.style.color = bal && bal.due ? 'var(--danger)' : 'var(--ok)';
+    document.getElementById('dPayments').innerHTML = o.payments.map(p =>
+      '<div class="pay-row"><span><b>' + ils(p.amount) + '</b>' + (p.note ? ' · ' + esc(p.note) : '') + ' <span class="sub">(' + new Date(p.created_at).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }) + ')</span></span>' +
+      '<button type="button" class="btn-danger payDel" data-id="' + p.id + '" style="padding:2px 8px;">🗑</button></div>').join('') || '<div class="sub">עדיין לא נרשם תשלום</div>';
+    document.querySelectorAll('#dPayments .payDel').forEach(b => b.onclick = async () => {
+      if (!confirm('למחוק את התשלום הזה?')) return;
+      try { await api('/orders/' + o.order_number + '/payments/' + b.dataset.id, { method: 'DELETE' }); openDetail(o.order_number); } catch (err) { alert(err.message); }
+    });
     const linesBox = document.getElementById('dLines');
     linesBox.innerHTML = o.lines.map(l =>
       '<div class="line" data-code="' + l.item_code + '"><div class="line-head"><b>' + l.item_code + ' · פריט ' + l.line_no + '</b>' +
@@ -537,8 +575,14 @@ document.getElementById('dSave').addEventListener('click', async () => {
   msg.className = 'msg';
   if (!document.getElementById('dFirst').value.trim() && !document.getElementById('dLast').value.trim()) { msg.className = 'msg err'; msg.textContent = 'צריך שם פרטי או שם משפחה.'; return; }
   if (!checkPhone(document.getElementById('dPhone'), msg)) return;
+  // מילאו סכום תשלום ולא לחצו "הוסף תשלום" — לא שומרים, כדי שהתשלום לא ילך לאיבוד
+  if (document.getElementById('dPayAmount').value.trim()) {
+    msg.className = 'msg err'; msg.textContent = 'מילאת סכום תשלום ולא לחצת "הוסף תשלום". לחץ "הוסף תשלום" (או מחק את הסכום) ואז שמור.';
+    document.getElementById('dPayAmount').focus(); return;
+  }
   try {
     await api('/orders/' + openOrder.order_number, { method: 'PUT', body: {
+      price: document.getElementById('dPrice').value === '' ? null : +document.getElementById('dPrice').value,
       customer: { first_name: document.getElementById('dFirst').value.trim(), last_name: document.getElementById('dLast').value.trim(), phone: document.getElementById('dPhone').value },
       target_date: document.getElementById('dTarget').value || null,
       notes: document.getElementById('dNotes').value,
@@ -549,6 +593,15 @@ document.getElementById('dSave').addEventListener('click', async () => {
 document.getElementById('dSupplyAll').addEventListener('click', async () => {
   if (!confirm('לסמן את כל הפריטים בהזמנה #' + openOrder.order_number + ' כסופקו?')) return;
   try { await api('/orders/' + openOrder.order_number + '/supply-all', { method: 'POST' }); closeDetail(); } catch (err) { alert(err.message); }
+});
+document.getElementById('dPayAdd').addEventListener('click', async () => {
+  const amount = +document.getElementById('dPayAmount').value;
+  if (!(amount > 0)) { alert('יש להזין סכום'); return; }
+  try {
+    await api('/orders/' + openOrder.order_number + '/payments', { method: 'POST', body: { amount, note: document.getElementById('dPayNote').value } });
+    document.getElementById('dPayAmount').value = ''; document.getElementById('dPayNote').value = '';
+    openDetail(openOrder.order_number);
+  } catch (err) { alert(err.message); }
 });
 document.getElementById('dLabels').addEventListener('click', () => askLabels(openOrder));
 document.getElementById('dPrintA4').addEventListener('click', () => askPrintA4(openOrder));

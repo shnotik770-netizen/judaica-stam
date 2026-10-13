@@ -219,6 +219,9 @@
   .cat-add button{white-space:nowrap;}
   .site-strip{margin:-20px -16px 14px;padding:7px 16px;background:var(--accent);color:#fff;font-weight:800;font-size:13.5px;letter-spacing:.2px;text-align:center;}
   @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .site-strip{color:#111;} }
+  .price-row{display:flex;gap:8px;align-items:center;}
+  .price-row input{flex:1;min-width:0;}
+  .price-row button{padding:8px 12px;font-size:13px;white-space:nowrap;}
 </style>
 </head>
 <body>
@@ -273,8 +276,9 @@
     <div id="bags"></div>
     <button type="button" class="btn-add" id="addBag">+ הוסף שקית</button>
 
+    <div class="field customer-only"><label>💰 סכום לתשלום — כמה הלקוח אמור לשלם (₪)</label><input id="newPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="לא חובה"></div>
     <div class="grid2 customer-only">
-      <div class="field"><label>💰 תשלום שהתקבל עכשיו (₪)</label><input id="newPayAmount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="לא חובה"></div>
+      <div class="field"><label>💵 שולם בפועל עכשיו (₪)</label><input id="newPayAmount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="לא חובה"></div>
       <div class="field"><label>הערה לתשלום</label><input id="newPayNote" placeholder="לא חובה"></div>
     </div>
 
@@ -381,8 +385,9 @@
     <div class="payments-box">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <b>💰 תשלומים</b>
-        <span id="editPaidTotal" style="font-weight:700;color:var(--ok);"></span>
+        <span id="editPaidTotal" style="font-weight:700;"></span>
       </div>
+      <div class="price-row"><label style="margin:0;white-space:nowrap;">סכום לתשלום (₪)</label><input id="editPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="לא נרשם"><button type="button" class="btn-ghost" id="editPriceSave">שמור</button></div>
       <div id="editPayments" style="display:flex;flex-direction:column;gap:5px;"></div>
       <div class="pay-form">
         <input id="payAmount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="סכום ₪">
@@ -724,6 +729,7 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
       address: document.getElementById('address').value.trim(),
     },
     kind: orderKind,
+    price: orderKind === 'customer' && document.getElementById('newPrice').value !== '' ? +document.getElementById('newPrice').value : null,
     brought_by: orderKind === 'customer' ? document.getElementById('broughtBy').value.trim() : '',
     payment: orderKind === 'customer' && document.getElementById('newPayAmount').value
       ? { amount: +document.getElementById('newPayAmount').value, note: document.getElementById('newPayNote').value.trim() }
@@ -881,7 +887,10 @@ async function loadList(){
       const reportInfo = b.report_received_at ? ' · 📋 יש דוח ממיכאל' : '';
       const broughtInfo = b.brought_by ? ' · הובא ע"י ' + esc(b.brought_by) : '';
       const directInfo = b.delivered_direct_note ? ' · 🤝 ' + esc(b.delivered_direct_note) : '';
-      const paidInfo = b.paid_total > 0 ? ' · 💰 שולם ₪' + Number(b.paid_total).toLocaleString('he-IL') : '';
+      // תשלום: אם נרשם סכום לתשלום — כמה נשאר; אחרת רק כמה שולם
+      const paidInfo = b.price != null
+        ? (b.price - b.paid_total > 0.005 ? ' · <b style="color:var(--danger);">💰 נשאר לשלם ' + ils(b.price - b.paid_total) + ' מתוך ' + ils(b.price) + '</b>' : ' · 💰 ✓ שולם')
+        : (b.paid_total > 0 ? ' · 💰 שולם ' + ils(b.paid_total) : '');
       const supplierNoteInfo = b.supplier_note ? ' · <b style="color:var(--accent);">💬 מיכאל: ' + esc(b.supplier_note) + '</b>' : '';
       return '<div class="bag-row" data-order="' + b.order_number + '" data-code="' + b.bag_code + '" style="cursor:pointer;">' +
         '<div><div class="who">' + b.bag_code + ' · ' + supplyTag(b) + esc(fullName(b)) + '</div>' +
@@ -955,7 +964,7 @@ function renderEdit(data){
   const supplierNoEl = document.getElementById('editSupplierNo');
   supplierNoEl.textContent = data.supplier_customer_number ? 'מספר לקוח אצל מיכאל: ' + data.supplier_customer_number : '';
   supplierNoEl.classList.toggle('hidden', !data.supplier_customer_number);
-  renderPayments(data.payments || [], data.paid_total || 0);
+  renderPayments(data.payments || [], data.paid_total || 0, data.price);
   [...document.querySelectorAll('#editFirstName,#editLastName,#editPhone,#editAddress,#editBroughtBy')]
     .forEach(el => el.disabled = editLocked);
 
@@ -1140,6 +1149,7 @@ document.getElementById('editSave').addEventListener('click', async () => {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'שגיאה');
+    await savePriceIfChanged();
     // נשמר — סוגרים את ההזמנה וחוזרים לרשימה
     closeEdit();
   } catch (err) {
@@ -1993,8 +2003,30 @@ async function loadBagReports(code, box){
 }
 // --- תשלומים על הזמנה (בד"כ בשעת המסירה). לא תלוי בנעילת ההזמנה; כל הוספה/מחיקה נרשמת בהיסטוריה.
 const ils = (n) => '₪' + Number(n || 0).toLocaleString('he-IL', { maximumFractionDigits: 2 });
-function renderPayments(payments, total){
-  document.getElementById('editPaidTotal').textContent = payments.length ? 'שולם: ' + ils(total) : '';
+// "לתשלום X · שולם Y · נשאר Z" (או ✓ שולם במלואו). price=null — רק כמה שולם
+function balanceText(price, paid){
+  if (price == null) return { text: paid > 0 ? 'שולם: ' + ils(paid) : '', cls: 'ok' };
+  const left = Math.round((price - paid) * 100) / 100;
+  if (left <= 0) return { text: '✓ שולם במלואו (' + ils(paid) + (left < 0 ? ', עודף ' + ils(-left) : '') + ')', cls: 'ok' };
+  return { text: 'לתשלום ' + ils(price) + ' · שולם ' + ils(paid) + ' · נשאר ' + ils(left), cls: 'due' };
+}
+let editLoadedPrice = '';
+// "שמור שינויים" שומר גם סכום לתשלום אם שונה (בלי ללחוץ על "שמור" שלידו)
+async function savePriceIfChanged(){
+  const v = document.getElementById('editPrice').value;
+  if (v === editLoadedPrice) return;
+  const res = await fetch(API_BASE + '/api/orders/' + encodeURIComponent(editOrderNumber) + '/price', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ price: v === '' ? null : +v }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'שגיאה');
+}
+function renderPayments(payments, total, price){
+  const bal = balanceText(price, total);
+  const el = document.getElementById('editPaidTotal');
+  el.textContent = bal.text; el.style.color = bal.cls === 'due' ? 'var(--danger)' : 'var(--ok)';
+  document.getElementById('editPrice').value = price == null ? '' : price;
+  editLoadedPrice = document.getElementById('editPrice').value;
   document.getElementById('editPayments').innerHTML = payments.map(p =>
     '<div class="pay-row"><span><b>' + ils(p.amount) + '</b>' + (p.method ? ' · ' + esc(p.method) : '') + (p.note ? ' · ' + esc(p.note) : '') +
     ' <span style="color:var(--text-muted);font-size:11.5px;">(' + new Date(p.created_at).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }) + ')</span></span>' +
@@ -2010,6 +2042,17 @@ function renderPayments(payments, total){
     } catch (err) { alert(err.message); }
   }));
 }
+document.getElementById('editPriceSave').addEventListener('click', async () => {
+  const v = document.getElementById('editPrice').value;
+  try {
+    const res = await fetch(API_BASE + '/api/orders/' + encodeURIComponent(editOrderNumber) + '/price', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ price: v === '' ? null : +v }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה');
+    openEdit(editOrderNumber);
+  } catch (err) { alert(err.message); }
+});
 document.getElementById('payAdd').addEventListener('click', async () => {
   const amount = document.getElementById('payAmount').value;
   if (!(+amount > 0)) { alert('יש להזין סכום'); return; }

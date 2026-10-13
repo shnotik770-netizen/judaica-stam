@@ -6,6 +6,7 @@ import { toHebrewDate } from "../lib/hebrewDate.js";
 import { sendSms } from "../lib/call2all.js";
 import { markSmsDirty } from "../lib/smsStore.js";
 import { cleanPhone } from "../lib/phone.js";
+import { cleanPrice } from "../lib/money.js";
 import { logActivity, snapshotBagStates, BAG_STATE_FIELDS } from "../lib/activityLog.js";
 import { getSetting, setSetting } from "../lib/settings.js";
 import { cleanVariant, variantText, cleanMezuzahCases, VARIANT_FIELDS } from "../lib/variant.js";
@@ -141,6 +142,9 @@ router.post("/", asyncHandler(async (req, res) => {
     b.mezuzah_cases = cases.value;
   }
 
+  // כמה הלקוח אמור לשלם (לא חובה)
+  const price = cleanPrice(req.body?.price);
+  if (price.error) { res.status(400).json({ error: price.error }); return; }
   // תשלום שהתקבל כבר בשעת הזנת ההזמנה (לא חובה) — נשמר יחד עם ההזמנה, באותה טרנזקציה
   let initialPayment = null;
   if (req.body.payment && req.body.payment.amount !== undefined && req.body.payment.amount !== "" && req.body.payment.amount !== null) {
@@ -180,9 +184,9 @@ router.post("/", asyncHandler(async (req, res) => {
     }
 
     const order = await client.query(
-      `insert into orders (order_number, customer_id, notes, target_date, brought_by, kind)
-       values (nextval('order_number_seq')::text,$1,$2,$3,$4,$5) returning id, order_number`,
-      [customerId, req.body.notes || null, req.body.target_date || null, broughtBy, kind]
+      `insert into orders (order_number, customer_id, notes, target_date, brought_by, kind, price)
+       values (nextval('order_number_seq')::text,$1,$2,$3,$4,$5,$6) returning id, order_number`,
+      [customerId, req.body.notes || null, req.body.target_date || null, broughtBy, kind, price.value]
     );
     const orderId = order.rows[0].id;
     const order_number = order.rows[0].order_number;
@@ -317,7 +321,7 @@ router.get("/bags", asyncHandler(async (req, res) => {
             b.bag_code, b.item_type, b.item_type_note, b.quantity, b.returned_quantity, b.variant, b.mezuzah_cases, b.supplier_note, b.status,
             b.picked_up_at, b.imported_at, b.ready_at, b.returned_at, b.delivered_direct_at, b.delivered_direct_note, b.customer_notified_at, b.customer_collected_at, b.created_at,
             (select max(r.received_at) from bag_reports r where r.bag_id = b.id) as report_received_at,
-            (select coalesce(sum(p.amount), 0)::float from order_payments p where p.order_id = o.id) as paid_total,
+            (select coalesce(sum(p.amount), 0)::float from order_payments p where p.order_id = o.id) as paid_total, o.price::float as price,
             col.collection_number, col.started_at as collection_started_at
      from bags b
      join orders o on o.id = b.order_id
@@ -709,7 +713,7 @@ router.get("/", asyncHandler(async (req, res) => {
 // (imported_at) או כבר חזרה (returned) — לא ניתן יותר לערוך/למחוק את ההזמנה או שקיות שלה.
 router.get("/:order_number", asyncHandler(async (req, res) => {
   const o = await pool.query(
-    `select o.id, o.order_number, o.status, o.brought_by, o.kind, c.first_name, c.last_name, c.phone, c.address, c.supplier_customer_number
+    `select o.id, o.order_number, o.status, o.brought_by, o.kind, o.price::float as price, c.first_name, c.last_name, c.phone, c.address, c.supplier_customer_number
      from orders o join customers c on c.id = o.customer_id
      where o.order_number = $1`,
     [req.params.order_number]
@@ -856,6 +860,21 @@ router.post("/:order_number/payments", asyncHandler(async (req, res) => {
   logActivity(null, req.params.order_number, "payment_added",
     `₪${amount}` + (method ? ` · ${method}` : "") + (note ? ` · ${note}` : ""));
   res.status(201).json({ ok: true, id: rows[0].id });
+}));
+
+// סכום לתשלום — מותר גם בהזמנה נעולה (כמו תשלומים)
+router.put("/:order_number/price", asyncHandler(async (req, res) => {
+  const price = cleanPrice(req.body?.price);
+  if (price.error) { res.status(400).json({ error: price.error }); return; }
+  const { rows } = await pool.query(
+    "update orders o set price = $2, updated_at = now() from (select id, price as old from orders where order_number = $1) x where o.id = x.id returning x.old::float as old",
+    [req.params.order_number, price.value]
+  );
+  if (!rows.length) { res.status(404).json({ error: "הזמנה לא נמצאה" }); return; }
+  if (rows[0].old !== price.value) {
+    logActivity(null, req.params.order_number, "order_edited", `סכום לתשלום: ${rows[0].old ?? "—"} → ${price.value ?? "—"}`);
+  }
+  res.json({ ok: true });
 }));
 
 router.delete("/:order_number/payments/:id", asyncHandler(async (req, res) => {

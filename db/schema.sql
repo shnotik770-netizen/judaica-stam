@@ -282,3 +282,15 @@ create table if not exists item_events (
 create index if not exists idx_item_events_order on item_events(item_order_id);
 -- שם הפריט (שדה חופשי) — בנוסף לסוג (מהרשימה); description = הערות / הסבר
 alter table item_order_lines add column if not exists item_name text;
+
+-- כמה הלקוח אמור לשלם (null = לא נרשם). התשלומים בפועל — order_payments / item_order_payments; היתרה = price − סכום התשלומים
+alter table orders add column if not exists price numeric(10,2);
+alter table item_orders add column if not exists price numeric(10,2);
+create table if not exists item_order_payments (
+  id uuid primary key default gen_random_uuid(),
+  item_order_id uuid not null references item_orders(id) on delete cascade,
+  amount numeric(10,2) not null check (amount > 0),
+  note text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_item_order_payments_order on item_order_payments(item_order_id);

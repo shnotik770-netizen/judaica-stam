@@ -7,6 +7,7 @@ import { asyncHandler } from "../lib/asyncHandler.js";
 import { enqueuePrint } from "../lib/printQueue.js";
 import { toHebrewDate } from "../lib/hebrewDate.js";
 import { cleanPhone } from "../lib/phone.js";
+import { cleanPrice } from "../lib/money.js";
 
 export const router = express.Router();
 
@@ -178,16 +179,24 @@ router.post("/orders", asyncHandler(async (req, res) => {
   if (cl.error) { res.status(400).json({ error: cl.error }); return; }
   const target_date = req.body?.target_date || null;
   const notes = String(req.body?.notes || "").trim().slice(0, 1000) || null;
+  const price = cleanPrice(req.body?.price); // כמה הלקוח אמור לשלם
+  if (price.error) { res.status(400).json({ error: price.error }); return; }
+  const pay = cleanPrice(req.body?.payment?.amount); // שולם בפועל כבר עכשיו
+  if (pay.error) { res.status(400).json({ error: "סכום התשלום לא תקין" }); return; }
   const client = await pool.connect();
   let order, created;
   try {
     await client.query("begin");
     const customerId = await upsertCustomer(client, cc.customer);
     order = (await client.query(
-      `insert into item_orders (order_number, customer_id, target_date, notes)
-       values (nextval('item_order_number_seq')::text, $1, $2, $3) returning id, order_number`,
-      [customerId, target_date, notes]
+      `insert into item_orders (order_number, customer_id, target_date, notes, price)
+       values (nextval('item_order_number_seq')::text, $1, $2, $3, $4) returning id, order_number`,
+      [customerId, target_date, notes, price.value]
     )).rows[0];
+    if (pay.value > 0) {
+      await client.query("insert into item_order_payments (item_order_id, amount, note) values ($1,$2,$3)",
+        [order.id, pay.value, String(req.body.payment.note || "").trim().slice(0, 300) || null]);
+    }
     created = await insertLines(client, order, cl.lines, 1);
     await logEvent(client, order.id, null, "order_created", `${created.length} פריטים` + (target_date ? ` · יעד ${target_date}` : ""));
     await client.query("commit");
@@ -222,6 +231,7 @@ router.get("/orders", asyncHandler(async (req, res) => {
   }
   const { rows } = await pool.query(
     `select o.order_number, o.target_date, o.notes, o.supplied_at, o.created_at, c.first_name, c.last_name, c.phone,
+            o.price::float as price, (select coalesce(sum(p.amount), 0)::float from item_order_payments p where p.item_order_id = o.id) as paid_total,
             (o.target_date - (now() at time zone 'Asia/Jerusalem')::date) as days_left,
             coalesce(json_agg(json_build_object('item_code', l.item_code, 'line_no', l.line_no, 'product_type', pt.name,
               'item_name', l.item_name, 'description', l.description, 'quantity', l.quantity, 'status_id', l.status_id, 'status', s.name,
@@ -251,14 +261,18 @@ async function loadOrder(orderNumber) {
 router.get("/orders/:n", asyncHandler(async (req, res) => {
   const order = await loadOrder(req.params.n);
   if (!order) { res.status(404).json({ error: "הזמנה לא נמצאה" }); return; }
-  const [lines, events] = await Promise.all([
+  const [lines, events, payments] = await Promise.all([
     pool.query(LINE_SELECT + " where o.id = $1 order by l.line_no", [order.id]),
     pool.query("select item_code, action, detail, created_at from item_events where item_order_id = $1 order by created_at desc, id desc limit 200", [order.id]),
+    pool.query("select id, amount::float as amount, note, created_at from item_order_payments where item_order_id = $1 order by created_at", [order.id]),
   ]);
   const { id, customer_id, ...rest } = order;
   res.json({
     ...rest,
     created_at_hebrew: toHebrewDate(order.created_at),
+    price: order.price == null ? null : Number(order.price),
+    payments: payments.rows,
+    paid_total: payments.rows.reduce((sum, p) => sum + p.amount, 0),
     lines: lines.rows.map(({ id: _i, item_order_id, order_id, ...l }) => l),
     events: events.rows,
   });
@@ -290,6 +304,13 @@ router.put("/orders/:n", asyncHandler(async (req, res) => {
       const before = order.target_date || null;
       if (before !== td) changes.push(`תאריך יעד: ${before || "—"} → ${td || "—"}`);
     }
+    if (req.body?.price !== undefined) {
+      const price = cleanPrice(req.body.price);
+      if (price.error) { await client.query("rollback"); res.status(400).json({ error: price.error }); return; }
+      await client.query("update item_orders set price = $1 where id = $2", [price.value, order.id]);
+      const before = order.price == null ? null : Number(order.price);
+      if (before !== price.value) changes.push(`סכום לתשלום: ${before ?? "—"} → ${price.value ?? "—"}`);
+    }
     if (req.body?.notes !== undefined) {
       const notes = String(req.body.notes || "").trim().slice(0, 1000) || null;
       await client.query("update item_orders set notes = $1 where id = $2", [notes, order.id]);
@@ -310,6 +331,26 @@ router.put("/orders/:n", asyncHandler(async (req, res) => {
 router.delete("/orders/:n", asyncHandler(async (req, res) => {
   const { rowCount } = await pool.query("delete from item_orders where order_number = $1", [req.params.n]);
   if (!rowCount) { res.status(404).json({ error: "הזמנה לא נמצאה" }); return; }
+  res.json({ ok: true });
+}));
+
+// תשלומים (שולם בפועל)
+router.post("/orders/:n/payments", asyncHandler(async (req, res) => {
+  const order = await loadOrder(req.params.n);
+  if (!order) { res.status(404).json({ error: "הזמנה לא נמצאה" }); return; }
+  const amt = cleanPrice(req.body?.amount);
+  if (amt.error || !(amt.value > 0)) { res.status(400).json({ error: "סכום התשלום חייב להיות מספר גדול מ-0" }); return; }
+  const note = String(req.body?.note || "").trim().slice(0, 300) || null;
+  await pool.query("insert into item_order_payments (item_order_id, amount, note) values ($1,$2,$3)", [order.id, amt.value, note]);
+  await logEvent(pool, order.id, null, "payment_added", `₪${amt.value}` + (note ? ` · ${note}` : ""));
+  res.json({ ok: true });
+}));
+router.delete("/orders/:n/payments/:id", asyncHandler(async (req, res) => {
+  const order = await loadOrder(req.params.n);
+  if (!order) { res.status(404).json({ error: "הזמנה לא נמצאה" }); return; }
+  const { rows } = await pool.query("delete from item_order_payments where id = $1 and item_order_id = $2 returning amount::float as amount", [req.params.id, order.id]);
+  if (!rows.length) { res.status(404).json({ error: "תשלום לא נמצא" }); return; }
+  await logEvent(pool, order.id, null, "payment_deleted", `₪${rows[0].amount}`);
   res.json({ ok: true });
 }));
 
