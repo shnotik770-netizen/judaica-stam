@@ -116,6 +116,22 @@
   .check-btn.on{background:var(--warn);color:#fff;}
   .dirty-bar{position:sticky;bottom:8px;z-index:20;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#f6c343;color:#3d2c00;border-radius:11px;padding:10px 12px;font-weight:800;font-size:14px;box-shadow:0 3px 12px rgba(0,0,0,.25);}
   .dirty-bar button{background:#3d2c00;color:#fff;padding:8px 12px;font-size:13px;white-space:nowrap;}
+  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+  .tiles.st{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));}
+  .tile{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px;text-align:center;cursor:pointer;}
+  .tile:hover{border-color:var(--accent);}
+  .tile .n{font-size:24px;font-weight:800;color:var(--accent);line-height:1.1;}
+  .tile .l{font-size:12.5px;font-weight:700;margin-top:3px;}
+  .tile .m{font-size:11.5px;color:var(--text-muted);}
+  .tile.ok .n{color:var(--ok);} .tile.warn .n{color:var(--danger);font-size:19px;}
+  .card.dash .tile{background:var(--surface-2);}
+  .matrix{border-collapse:collapse;font-size:12.5px;width:100%;}
+  .matrix th,.matrix td{border-bottom:1px solid var(--border);padding:5px 7px;text-align:center;white-space:nowrap;}
+  .matrix th:first-child,.matrix td:first-child{text-align:right;}
+  .matrix th{color:var(--text-muted);font-weight:600;font-size:11.5px;}
+  .dash-list{display:flex;flex-direction:column;gap:5px;}
+  .dash-row{display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--surface-2);border-radius:9px;padding:8px 10px;cursor:pointer;font-size:13.5px;flex-wrap:wrap;}
+  .dash-row:hover{outline:1px solid var(--accent);}
   /* ניהול רשימות (מוצג גם בדף הניהול של החנות) */
   .admin-list{display:flex;flex-direction:column;gap:6px;}
   .admin-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
@@ -155,11 +171,13 @@
     <div class="tab active" data-tab="active">פעילות</div>
     <div class="tab" data-tab="all">כל ההזמנות</div>
     <div class="tab" data-tab="new">+ הזמנה חדשה</div>
-    <div class="tab" data-tab="supplied">סופקו</div>
   </div>
 
+  <!-- פעילות: דשבורד -->
+  <div id="dashPanel" style="display:flex;flex-direction:column;gap:12px;"></div>
+
   <!-- רשימה -->
-  <div id="listPanel" style="display:flex;flex-direction:column;gap:10px;">
+  <div id="listPanel" class="hidden" style="display:flex;flex-direction:column;gap:10px;">
     <div class="filters">
       <div class="search-wrap"><input id="search" placeholder="חיפוש לפי שם / טלפון / מספר הזמנה / פריט…" autocomplete="off"><button type="button" id="searchClear" class="hidden" aria-label="נקה חיפוש">✕</button></div>
       <select id="statusFilter"><option value="">כל המצבים</option></select>
@@ -291,15 +309,43 @@ function askLabels(order){
 // הדפסת A4 מהמחשב: לכל פריט ריבוע — פרטי ההזמנה, רשימת כל הפריטים ומצבם בקטן, והפריט עצמו בגדול
 function askPrintA4(order){
   const body = openModal('<b>🖨️ הדפסת A4 · הזמנה #' + order.order_number + '</b><div class="sub" style="margin:0;">פתק קטן לכל פריט (כרבע עמוד).</div>' +
-    '<div class="pick-list"><label><input type="radio" name="a4" value="" checked><span><b>כל ההזמנה</b> (' + order.lines.length + ' פריטים)</span></label>' +
+    '<div class="pick-list"><label><input type="radio" name="a4" value="__sheet"><span><b>📄 דף הזמנה מלא</b> — כל ההזמנה בדף אחד, בלי חלוקה לפתקים</span></label>' +
+    '<label><input type="radio" name="a4" value="" checked><span><b>פתקים לכל הפריטים</b> (' + order.lines.length + ')</span></label>' +
     order.lines.map(l => '<label><input type="radio" name="a4" value="' + l.item_code + '"><span>רק פריט ' + l.line_no + ' · ' + esc(lineText(l) || l.item_code) + '</span></label>').join('') + '</div>' +
     '<div style="display:flex;gap:8px;"><button type="button" class="btn-primary" id="mA4">🖨️ הדפס</button><button type="button" class="btn-ghost" id="mCancel">ביטול</button></div>');
   body.querySelector('#mCancel').onclick = closeModal;
   body.querySelector('#mA4').onclick = () => {
     const code = body.querySelector('input[name=a4]:checked').value;
     closeModal();
-    printA4(order, code ? order.lines.filter(l => l.item_code === code) : order.lines);
+    if (code === '__sheet') printOrderSheet(order);
+    else printA4(order, code ? order.lines.filter(l => l.item_code === code) : order.lines);
   };
+}
+// דף A4 אחד עם כל ההזמנה: פרטי לקוח והזמנה, טבלת כל הפריטים (סוג, שם, הערות, מצב) ותשלום
+function openPrintWindow(title, css, html){
+  const w = window.open('', '_blank');
+  if (!w) { alert('הדפדפן חסם את חלון ההדפסה — אפשר חלונות קופצים לאתר'); return; }
+  w.document.write('<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>' + title + '</title><style>' + css + '</style></head><body>' + html +
+    '<script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>');
+  w.document.close();
+}
+function printOrderSheet(o){
+  const bal = balanceInfo(o.price, o.paid_total);
+  const html = '<div class="top"><div><h1>הזמנה #' + o.order_number + '</h1>' +
+      '<div class="cust">' + esc(fullName(o)) + ' · ' + esc(o.phone) + '</div>' +
+      '<div class="meta">נוצרה ' + esc(o.created_at_hebrew || '') + ' · ' + new Date(o.created_at).toLocaleDateString('he-IL') +
+      (o.target_date ? ' · <b>יעד: ' + fmtDate(o.target_date) + '</b>' : '') + (o.supplied_at ? ' · סופקה ' + new Date(o.supplied_at).toLocaleDateString('he-IL') : '') + '</div>' +
+      (o.notes ? '<div class="meta">הערות: ' + esc(o.notes) + '</div>' : '') + '</div>' +
+      '<img class="bc" src="/api/label/' + o.order_number + '" alt=""></div>' +
+    '<table><thead><tr><th>#</th><th>סוג</th><th>שם הפריט</th><th>הערות / הסבר</th><th>מצב</th></tr></thead><tbody>' +
+      o.lines.map(l => '<tr><td>' + l.line_no + '</td><td>' + esc(l.product_type || '') + '</td><td><b>' + esc(l.item_name || '') + '</b></td><td class="d">' + esc(l.description || '') + '</td><td>' + esc(l.status) + '</td></tr>').join('') +
+    '</tbody></table>' +
+    (bal ? '<div class="pay">💰 ' + esc(bal.text) + '</div>' : '');
+  openPrintWindow('הזמנה ' + o.order_number,
+    '@page{size:A4;margin:12mm}body{font-family:Arial,sans-serif;color:#000;margin:0}.top{display:flex;justify-content:space-between;gap:6mm;align-items:flex-start;border-bottom:2px solid #000;padding-bottom:4mm;margin-bottom:5mm}' +
+    'h1{font-size:20pt;margin:0 0 1mm}.cust{font-size:14pt;font-weight:700}.meta{font-size:10.5pt;margin-top:1mm}.bc{height:14mm}' +
+    'table{width:100%;border-collapse:collapse;font-size:11pt}th,td{border:1px solid #999;padding:2mm 2.5mm;text-align:right;vertical-align:top}th{background:#eee}td.d{white-space:pre-wrap}' +
+    '.pay{margin-top:5mm;font-size:12pt;font-weight:700}', html);
 }
 function printA4(o, lines){
   const created = new Date(o.created_at).toLocaleDateString('he-IL');
@@ -313,8 +359,8 @@ function printA4(o, lines){
       '<div class="big">' + esc(lineText(l) || 'פריט') + '</div>' +
       (l.description ? '<div class="desc">' + esc(l.description) + '</div>' : '') +
       '<div class="st">מצב: ' + esc(l.status) + '</div></div>' +
-      (o.lines.length > 1 ? '<div class="others">' + o.lines.filter(x => x.item_code !== l.item_code).map(x =>
-        x.line_no + '. ' + esc(lineText(x) || x.item_code) + ' — ' + esc(x.status)).join(' · ') + '</div>' : '') +
+      (o.lines.length > 1 ? '<div class="others"><b>פירוט הזמנה מלאה:</b> ' + o.lines.map(x =>
+        x.line_no + '. ' + esc(lineText(x) || x.item_code)).join(' · ') + '</div>' : '') +
     '</div>').join('');
   const w = window.open('', '_blank');
   if (!w) { alert('הדפדפן חסם את חלון ההדפסה — אפשר חלונות קופצים לאתר'); return; }
@@ -421,7 +467,7 @@ async function loadList(){
   const list = document.getElementById('ordersList');
   const count = document.getElementById('listCount');
   count.textContent = 'טוען…';
-  const params = new URLSearchParams({ state: currentTab === 'supplied' ? 'supplied' : currentTab === 'all' ? 'all' : 'active' });
+  const params = new URLSearchParams({ state: 'all' });
   if (checkDueOnly) params.set('check_due', '1');
   const q = document.getElementById('search').value.trim();
   if (q) params.set('q', q);
@@ -432,7 +478,7 @@ async function loadList(){
     cb.classList.toggle('hidden', !check_due_count && !checkDueOnly);
     cb.classList.toggle('on', checkDueOnly);
     cb.textContent = checkDueOnly ? '🔔 מוצגות רק הזמנות לבדיקה — לחץ להצגת הכל' : '🔔 ' + check_due_count + ' הזמנות שהגיע הזמן לבדוק מה מצבן — לחץ להצגה';
-    count.textContent = orders.length + ' הזמנות' + (currentTab === 'active' ? ' · ממוין לפי תאריך יעד (הדחוף למעלה)' : '');
+    count.textContent = orders.length + ' הזמנות · הפתוחות קודם, לפי תאריך יעד; אחריהן אלה שסופקו';
     list.innerHTML = orders.map(o => {
       const due = dueInfo(o);
       // סיכום מצבים: כמה פריטים בכל מצב
@@ -462,19 +508,63 @@ document.getElementById('searchClear').addEventListener('click', () => {
 });
 document.getElementById('statusFilter').addEventListener('change', loadList);
 
-function showTab(tab){
+// statusId (לא חובה) — מעבר מהדשבורד לרשימה מסוננת לפי מצב
+function showTab(tab, statusId){
   if (!confirmLeaveDetail()) return;
   currentTab = tab;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   document.getElementById('newPanel').classList.toggle('hidden', tab !== 'new');
-  document.getElementById('listPanel').classList.toggle('hidden', tab === 'new');
+  document.getElementById('dashPanel').classList.toggle('hidden', tab !== 'active');
+  document.getElementById('listPanel').classList.toggle('hidden', tab !== 'all');
   document.getElementById('detailPanel').classList.add('hidden');
-  if (tab !== 'new') {
-    // חזרה לרשימה מלשונית אחרת — מאפסים חיפוש ומסנן
+  if (tab === 'all') {
+    // חזרה לרשימה מלשונית אחרת — מאפסים חיפוש ומסננים
     document.getElementById('search').value = ''; document.getElementById('searchClear').classList.add('hidden');
-    document.getElementById('statusFilter').value = '';
+    document.getElementById('statusFilter').value = statusId ? String(statusId) : '';
+    checkDueOnly = statusId === 'check';
+    if (statusId === 'check') document.getElementById('statusFilter').value = '';
     loadList();
-  } else if (!document.querySelector('#nLines .line')) addNewLine();
+  } else if (tab === 'active') loadDashboard();
+  else if (!document.querySelector('#nLines .line')) addNewLine();
+}
+// --- פעילות: דשבורד של הפריטים בהזמנות הפתוחות — לפי מצב, לפי סוג, דחופות ולבדיקה ---
+async function loadDashboard(){
+  const box = document.getElementById('dashPanel');
+  if (!box.innerHTML) box.innerHTML = '<div class="sub">טוען…</div>';
+  try {
+    const d = await api('/dashboard');
+    const t = d.totals;
+    const shownStatuses = d.statuses.filter(s => !s.is_final);
+    const finalSt = d.statuses.filter(s => s.is_final);
+    const dueLabel = (n) => n < 0 ? '<span class="due overdue">באיחור ' + (-n) + ' ימים</span>' : n === 0 ? '<span class="due overdue">להיום</span>' : '<span class="due soon">בעוד ' + n + (n === 1 ? ' יום' : ' ימים') + '</span>';
+    const types = [...new Set(d.by_type.map(r => r.type))];
+    const cell = (type, sid) => (d.by_type.find(r => r.type === type && r.status_id === sid) || {}).n || '';
+    box.innerHTML =
+      '<div class="tiles">' +
+        '<div class="tile" data-go="all"><div class="n">' + t.open_orders + '</div><div class="l">הזמנות פתוחות</div></div>' +
+        '<div class="tile ok"><div class="n">' + t.ready_orders + '</div><div class="l">✓ מוכנות לאיסוף</div></div>' +
+        '<div class="tile' + (t.balance_due > 0 ? ' warn' : '') + '"><div class="n">' + ils(t.balance_due) + '</div><div class="l">💰 יתרה לגבייה</div></div>' +
+      '</div>' +
+      '<div class="card dash"><b>📦 פריטים לפי מצב</b><div class="sub" style="margin:0;">בהזמנות שעוד לא סופקו · לחיצה מציגה את ההזמנות</div><div class="tiles st">' +
+        shownStatuses.map(s => '<div class="tile' + (s.is_ready ? ' ok' : '') + '" data-status="' + s.id + '"><div class="n">' + s.items + '</div><div class="l">' + esc(s.name) + '</div>' +
+          (s.items ? '<div class="m">' + s.orders + (s.orders === 1 ? ' הזמנה' : ' הזמנות') + '</div>' : '') + '</div>').join('') +
+      '</div></div>' +
+      (types.length ? '<div class="card dash"><b>🏷️ לפי סוג פריט</b><div style="overflow-x:auto;"><table class="matrix"><thead><tr><th>סוג</th>' +
+        shownStatuses.concat(finalSt).filter(s => d.by_type.some(r => r.status_id === s.id)).map(s => '<th>' + esc(s.name) + '</th>').join('') + '</tr></thead><tbody>' +
+        types.map(ty => '<tr><td><b>' + esc(ty) + '</b></td>' + shownStatuses.concat(finalSt).filter(s => d.by_type.some(r => r.status_id === s.id)).map(s => '<td>' + cell(ty, s.id) + '</td>').join('') + '</tr>').join('') +
+        '</tbody></table></div></div>' : '') +
+      '<div class="card dash"><b>⏰ לפי תאריך יעד — באיחור ועד שבוע</b>' +
+        (d.urgent.length ? '<div class="dash-list">' + d.urgent.map(o => '<div class="dash-row" data-n="' + o.order_number + '"><span><b>#' + o.order_number + '</b> · ' + esc(fullName(o)) +
+          ' <span class="sub">' + o.ready + '/' + o.items + ' מוכנים</span></span><span>' + dueLabel(o.days_left) + ' <span class="sub">' + fmtDate(o.target_date) + '</span></span></div>').join('') + '</div>'
+          : '<div class="sub">אין הזמנות פתוחות עם תאריך יעד בשבוע הקרוב</div>') + '</div>' +
+      '<div class="card dash"><b>🔔 הגיע הזמן לבדוק</b>' +
+        (d.checks.length ? '<div class="dash-list">' + d.checks.map(o => '<div class="dash-row" data-n="' + o.order_number + '"><span><b>#' + o.order_number + '</b> · ' + esc(fullName(o)) + '</span><span class="due overdue">' +
+          (o.check_days === 0 ? 'היום' : 'מאז ' + fmtDate(o.check_date)) + '</span></div>').join('') + '</div>'
+          : '<div class="sub">אין הזמנות לבדיקה היום</div>') + '</div>';
+    box.querySelectorAll('[data-status]').forEach(el => el.onclick = () => showTab('all', +el.dataset.status));
+    box.querySelectorAll('[data-go="all"]').forEach(el => el.onclick = () => showTab('all'));
+    box.querySelectorAll('.dash-row').forEach(el => el.onclick = () => openDetail(el.dataset.n));
+  } catch (err) { box.innerHTML = '<div class="msg err">' + esc(err.message) + '</div>'; }
 }
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab)));
 
@@ -592,6 +682,7 @@ async function openDetail(n){
     const o = await api('/orders/' + encodeURIComponent(n));
     openOrder = o;
     document.getElementById('listPanel').classList.add('hidden');
+    document.getElementById('dashPanel').classList.add('hidden');
     document.getElementById('newPanel').classList.add('hidden');
     document.getElementById('detailPanel').classList.remove('hidden');
     document.getElementById('dMsg').className = 'msg';
@@ -664,8 +755,9 @@ function closeDetail(force){
   if (force !== true && !confirmLeaveDetail()) return;
   openOrder = null;
   document.getElementById('detailPanel').classList.add('hidden');
-  document.getElementById('listPanel').classList.remove('hidden');
-  loadList();
+  // חוזרים ללשונית שממנה נכנסו (דשבורד או רשימה)
+  if (currentTab === 'active') { document.getElementById('dashPanel').classList.remove('hidden'); loadDashboard(); }
+  else { document.getElementById('listPanel').classList.remove('hidden'); loadList(); }
 }
 document.getElementById('dBack').addEventListener('click', () => closeDetail());
 document.getElementById('dSave').addEventListener('click', async () => {
@@ -775,24 +867,32 @@ async function processScan(code){
   const line = found.item_code ? order.lines.find(l => l.item_code === found.item_code) : null;
   const body = openModal('<b>#' + order.order_number + ' · ' + esc(fullName(order)) + '</b>' +
     (order.target_date ? '<div class="sub">יעד: ' + fmtDate(order.target_date) + '</div>' : '') +
-    '<div class="mini-lines">' + order.lines.map(l => '<div' + (line && l.item_code === line.item_code ? ' class="me"' : '') + '><span>' + l.line_no + '. ' + esc(lineText(l) || l.item_code) + '</span><span>' + esc(l.status) + '</span></div>').join('') + '</div>' +
-    '<b style="font-size:14px;">מה לעדכן?</b><div class="pick-list">' +
-    (line ? '<label><input type="radio" name="sc" value="item" checked><span>רק פריט ' + line.line_no + ': <b>' + esc(lineText(line) || line.item_code) + '</b> (עכשיו: ' + esc(line.status) + ')</span></label>' : '') +
-    '<label><input type="radio" name="sc" value="order"' + (line ? '' : ' checked') + '><span>כל ההזמנה (' + order.lines.length + ' פריטים)</span></label></div>' +
+    // אילו פריטים לעדכן: הפריט שנסרק מסומן; אפשר לסמן גם פריטים אחרים מההזמנה (סריקת מספר הזמנה — כולם מסומנים)
+    '<div style="display:flex;justify-content:space-between;align-items:center;"><b style="font-size:14px;">אילו פריטים לעדכן?</b>' +
+    '<button type="button" class="btn-ghost btn-small" id="mAll">סמן / בטל הכל</button></div><div class="pick-list">' +
+    order.lines.map(l => '<label' + (line && l.item_code === line.item_code ? ' style="outline:2px solid var(--scan);"' : '') + '><input type="checkbox" value="' + l.item_code + '"' + (!line || l.item_code === line.item_code ? ' checked' : '') + '>' +
+      '<span style="flex:1;">' + l.line_no + '. <b>' + esc(lineText(l) || l.item_code) + '</b>' + (line && l.item_code === line.item_code ? ' (נסרק)' : '') + '</span><span class="sub">' + esc(l.status) + '</span></label>').join('') + '</div>' +
     '<b style="font-size:14px;">לאיזה מצב?</b><div class="status-pick">' + activeStatuses().map(s => '<button type="button" data-id="' + s.id + '">' + esc(s.name) + '</button>').join('') + '</div>' +
     '<div><button type="button" class="btn-ghost" id="mCancel">ביטול</button></div>');
   const done = () => { closeModal(); scanBusy = false; document.getElementById('scanInput').focus(); };
   body.querySelector('#mCancel').onclick = () => { addLog('warn', '#' + order.order_number, 'בוטל — לא עודכן'); done(); };
+  body.querySelector('#mAll').onclick = () => {
+    const boxes = [...body.querySelectorAll('.pick-list input')];
+    const all = boxes.every(x => x.checked); boxes.forEach(x => { x.checked = !all; });
+  };
   body.querySelectorAll('.status-pick button').forEach(b => b.onclick = async () => {
-    const whole = body.querySelector('input[name=sc]:checked').value === 'order';
+    const codes = [...body.querySelectorAll('.pick-list input:checked')].map(x => x.value);
+    if (!codes.length) { alert('צריך לסמן לפחות פריט אחד'); return; }
+    const whole = codes.length === order.lines.length;
     try {
-      const r = await api('/scan', { method: 'POST', body: { code: whole ? order.order_number : line.item_code, status_id: +b.dataset.id, whole_order: whole } });
+      const r = await api('/scan', { method: 'POST', body: { code: order.order_number, item_codes: codes, status_id: +b.dataset.id } });
       const who = '#' + r.order_number + ' · ' + fullName(r.customer);
-      const what = whole ? 'כל ההזמנה (' + r.total + ' פריטים)' : (r.items[0].text || r.items[0].item_code);
+      const what = whole && r.total > 1 ? 'כל ההזמנה (' + r.total + ' פריטים)' : r.items.map(i => i.text || i.item_code).join(', ');
       addLog('ok', who + ' → ' + r.status, what + (r.changed < r.total ? ' · ' + (r.total - r.changed) + ' כבר היו במצב הזה' : ''));
       flash('ok', '✓ ' + who + ' — ' + what + ' → ' + r.status);
       beepOk();
       if (!document.getElementById('listPanel').classList.contains('hidden')) loadList();
+      else if (!document.getElementById('dashPanel').classList.contains('hidden')) loadDashboard();
       else if (openOrder && openOrder.order_number === r.order_number) openDetail(r.order_number);
     } catch (err) { addLog('warn', code, err.message); flash('warn', err.message); beepError(); }
     done();
@@ -835,7 +935,7 @@ window.addEventListener('pagehide', stopCamera);
   document.getElementById('modal').addEventListener('click', e => { if (e.target.id === 'modal' && !scanBusy) closeModal(); });
   // ?scan=1 — פתיחה ישר במצב סריקה מהירה
   if (new URLSearchParams(location.search).get('scan') === '1') document.getElementById('scanToggle').click();
-  loadList();
+  loadDashboard();
 })();
 </script>
 </body>

@@ -214,6 +214,37 @@ router.post("/orders", asyncHandler(async (req, res) => {
   res.json({ order_number: order.order_number, item_codes: created.map((c) => c.item_code) });
 }));
 
+// דשבורד ("פעילות"): מצב כל הפריטים בהזמנות הפתוחות, לפי מצב ולפי סוג, הזמנות דחופות ותזכורות לבדיקה
+router.get("/dashboard", asyncHandler(async (req, res) => {
+  const [statuses, byType, urgent, checks, totals] = await Promise.all([
+    pool.query(`select s.id, s.name, s.is_ready, s.is_final, count(l.id)::int as items, count(distinct l.item_order_id)::int as orders
+      from item_statuses s
+      left join item_order_lines l on l.status_id = s.id and exists (select 1 from item_orders o where o.id = l.item_order_id and o.supplied_at is null)
+      where s.active or l.id is not null
+      group by s.id order by s.position, s.id`),
+    pool.query(`select coalesce(pt.name, l.custom_type, 'ללא סוג') as type, s.id as status_id, count(*)::int as n
+      from item_order_lines l join item_orders o on o.id = l.item_order_id and o.supplied_at is null
+      join item_statuses s on s.id = l.status_id left join product_types pt on pt.id = l.product_type_id
+      group by 1, 2 order by 1`),
+    // באיחור / להיום / עד 7 ימים
+    pool.query(`select o.order_number, o.target_date, (o.target_date - (now() at time zone 'Asia/Jerusalem')::date) as days_left, c.first_name, c.last_name,
+        count(l.id)::int as items, count(l.id) filter (where s.is_ready or s.is_final)::int as ready
+      from item_orders o join customers c on c.id = o.customer_id
+      left join item_order_lines l on l.item_order_id = o.id left join item_statuses s on s.id = l.status_id
+      where o.supplied_at is null and o.target_date <= (now() at time zone 'Asia/Jerusalem')::date + 7
+      group by o.id, c.id order by o.target_date limit 50`),
+    pool.query(`select o.order_number, o.check_date, (o.check_date - (now() at time zone 'Asia/Jerusalem')::date) as check_days, c.first_name, c.last_name
+      from item_orders o join customers c on c.id = o.customer_id
+      where o.supplied_at is null and o.check_date <= (now() at time zone 'Asia/Jerusalem')::date order by o.check_date limit 50`),
+    pool.query(`select count(*) filter (where o.supplied_at is null)::int as open_orders,
+        count(*) filter (where o.supplied_at is null and exists (select 1 from item_order_lines l where l.item_order_id = o.id)
+          and not exists (select 1 from item_order_lines l join item_statuses s on s.id = l.status_id where l.item_order_id = o.id and not (s.is_ready or s.is_final)))::int as ready_orders,
+        coalesce(sum(greatest(o.price - (select coalesce(sum(p.amount), 0) from item_order_payments p where p.item_order_id = o.id), 0)) filter (where o.supplied_at is null), 0)::float as balance_due
+      from item_orders o`),
+  ]);
+  res.json({ statuses: statuses.rows, by_type: byType.rows, urgent: urgent.rows, checks: checks.rows, totals: totals.rows[0] });
+}));
+
 // רשימה: state=active (ברירת מחדל — לא סופקו, לפי דחיפות: תאריך יעד קרוב קודם) / supplied / all
 router.get("/orders", asyncHandler(async (req, res) => {
   const state = req.query.state || "active";
@@ -482,7 +513,13 @@ router.post("/scan", asyncHandler(async (req, res) => {
   if (!status) { res.status(400).json({ error: "מצב לא קיים" }); return; }
   let lines;
   const single = await loadLine(code);
-  if (single) {
+  // item_codes — פריטים נבחרים מאותה הזמנה (מהחלון שנפתח אחרי סריקה)
+  const picked = Array.isArray(req.body?.item_codes) ? req.body.item_codes.map(String) : null;
+  if (picked && picked.length) {
+    const orderId = single ? single.order_id : (await loadOrder(code))?.id;
+    if (!orderId) { res.status(404).json({ error: "קוד לא מוכר" }); return; }
+    lines = (await pool.query(LINE_SELECT + " where o.id = $1 and l.item_code = any($2) order by l.line_no", [orderId, picked])).rows;
+  } else if (single) {
     lines = req.body?.whole_order
       ? (await pool.query(LINE_SELECT + " where o.id = $1 order by l.line_no", [single.order_id])).rows
       : [single];
