@@ -296,3 +296,5 @@ create table if not exists item_order_payments (
 create index if not exists idx_item_order_payments_order on item_order_payments(item_order_id);
 -- סוג פריט "אחר" שהוקלד ידנית (כשאין product_type_id)
 alter table item_order_lines add column if not exists custom_type text;
+-- תאריך לבדיקה — מתי לבדוק מה מצב ההזמנה (תזכורת; מסומן ברשימה כשהגיע)
+alter table item_orders add column if not exists check_date date;

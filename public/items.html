@@ -112,6 +112,10 @@
   .pay-row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;background:var(--surface);border-radius:8px;padding:6px 10px;}
   .chip.due{background:var(--danger-soft);color:var(--danger);}
   .type-field{display:flex;flex-direction:column;gap:6px;}
+  .check-btn{background:var(--warn-soft);color:var(--warn);border:1px solid var(--warn);font-weight:800;font-size:13.5px;text-align:center;}
+  .check-btn.on{background:var(--warn);color:#fff;}
+  .dirty-bar{position:sticky;bottom:8px;z-index:20;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#f6c343;color:#3d2c00;border-radius:11px;padding:10px 12px;font-weight:800;font-size:14px;box-shadow:0 3px 12px rgba(0,0,0,.25);}
+  .dirty-bar button{background:#3d2c00;color:#fff;padding:8px 12px;font-size:13px;white-space:nowrap;}
   /* ניהול רשימות (מוצג גם בדף הניהול של החנות) */
   .admin-list{display:flex;flex-direction:column;gap:6px;}
   .admin-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
@@ -149,6 +153,7 @@
 
   <div class="tabs">
     <div class="tab active" data-tab="active">פעילות</div>
+    <div class="tab" data-tab="all">כל ההזמנות</div>
     <div class="tab" data-tab="new">+ הזמנה חדשה</div>
     <div class="tab" data-tab="supplied">סופקו</div>
   </div>
@@ -159,6 +164,7 @@
       <div class="search-wrap"><input id="search" placeholder="חיפוש לפי שם / טלפון / מספר הזמנה / פריט…" autocomplete="off"><button type="button" id="searchClear" class="hidden" aria-label="נקה חיפוש">✕</button></div>
       <select id="statusFilter"><option value="">כל המצבים</option></select>
     </div>
+    <button type="button" class="check-btn hidden" id="checkDueBtn"></button>
     <div class="sub" id="listCount"></div>
     <div id="ordersList" style="display:flex;flex-direction:column;gap:8px;"></div>
   </div>
@@ -173,6 +179,7 @@
       <div><label>טלפון</label><input id="nPhone" type="tel" inputmode="numeric"></div>
       <div><label>תאריך יעד — עד מתי הכל אמור להיות מוכן</label><input id="nTarget" type="date"></div>
     </div>
+    <div><label>🔔 תאריך לבדיקה — מתי לבדוק מה מצב ההזמנה</label><input id="nCheck" type="date"></div>
     <div class="sub hidden" id="nSuggest"></div>
     <div><label>הערות</label><input id="nNotes" placeholder="לא חובה"></div>
     <div class="grid2">
@@ -199,7 +206,10 @@
       <div><label>טלפון</label><input id="dPhone" type="tel" inputmode="numeric"></div>
       <div><label>תאריך יעד</label><input id="dTarget" type="date"></div>
     </div>
-    <div><label>הערות</label><input id="dNotes"></div>
+    <div class="grid2">
+      <div><label>הערות</label><input id="dNotes"></div>
+      <div><label>🔔 תאריך לבדיקה</label><input id="dCheck" type="date"></div>
+    </div>
     <div class="pay-box">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><b>💰 תשלום</b><span id="dBalance" style="font-weight:700;"></span></div>
       <div><label>סכום לתשלום (₪) * — נשמר ב"שמור פרטים"</label><input id="dPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="חובה"></div>
@@ -213,6 +223,7 @@
       <button type="button" class="btn-ghost" id="dPrintA4">🖨️ הדפסת A4</button>
     </div>
     <div class="msg" id="dMsg"></div>
+    <div id="dDirtyBar" class="dirty-bar hidden">⚠️ יש שינויים שממתינים לשמירה <button type="button" id="dDirtySave">שמור פרטים</button></div>
     <b style="font-size:14px;">פריטים</b>
     <div id="dLines" style="display:flex;flex-direction:column;gap:8px;"></div>
     <details>
@@ -279,7 +290,7 @@ function askLabels(order){
 }
 // הדפסת A4 מהמחשב: לכל פריט ריבוע — פרטי ההזמנה, רשימת כל הפריטים ומצבם בקטן, והפריט עצמו בגדול
 function askPrintA4(order){
-  const body = openModal('<b>🖨️ הדפסת A4 · הזמנה #' + order.order_number + '</b><div class="sub" style="margin:0;">ריבוע לכל פריט (שניים בעמוד).</div>' +
+  const body = openModal('<b>🖨️ הדפסת A4 · הזמנה #' + order.order_number + '</b><div class="sub" style="margin:0;">פתק קטן לכל פריט (כרבע עמוד).</div>' +
     '<div class="pick-list"><label><input type="radio" name="a4" value="" checked><span><b>כל ההזמנה</b> (' + order.lines.length + ' פריטים)</span></label>' +
     order.lines.map(l => '<label><input type="radio" name="a4" value="' + l.item_code + '"><span>רק פריט ' + l.line_no + ' · ' + esc(lineText(l) || l.item_code) + '</span></label>').join('') + '</div>' +
     '<div style="display:flex;gap:8px;"><button type="button" class="btn-primary" id="mA4">🖨️ הדפס</button><button type="button" class="btn-ghost" id="mCancel">ביטול</button></div>');
@@ -292,29 +303,30 @@ function askPrintA4(order){
 }
 function printA4(o, lines){
   const created = new Date(o.created_at).toLocaleDateString('he-IL');
-  const boxes = lines.map(l =>
-    '<div class="box"><div class="hdr"><div><div class="ord">הזמנה #' + o.order_number + '</div>' +
-      '<div class="cust">' + esc(fullName(o)) + ' · ' + esc(o.phone) + '</div>' +
-      '<div class="meta">נוצרה ' + esc(o.created_at_hebrew || '') + ' · ' + created + (o.target_date ? ' · <b>יעד: ' + fmtDate(o.target_date) + '</b>' : '') + '</div>' +
-      (o.notes ? '<div class="meta">הערות להזמנה: ' + esc(o.notes) + '</div>' : '') + '</div>' +
+  // פתק קטן לכל פריט (שני טורים, גובה לפי התוכן — בערך רבע עמוד): פרטי ההזמנה ושאר הפריטים באותיות קטנות, הפריט עצמו בגדול
+  const notes = lines.map(l =>
+    '<div class="note"><div class="hdr"><div><b>#' + o.order_number + ' · ' + esc(fullName(o)) + '</b> · ' + esc(o.phone) +
+      '<div class="meta">נוצרה ' + esc(o.created_at_hebrew || '') + ' · ' + created + (o.target_date ? ' · <b>יעד ' + fmtDate(o.target_date) + '</b>' : '') + '</div>' +
+      (o.notes ? '<div class="meta">' + esc(o.notes) + '</div>' : '') + '</div>' +
       '<img class="bc" src="/api/label/' + l.item_code + '" alt=""></div>' +
-      '<table class="all">' + o.lines.map(x => '<tr' + (x.item_code === l.item_code ? ' class="me"' : '') + '><td>' + x.line_no + '</td><td>' + esc(lineText(x)) +
-        (x.description ? ' <span class="n">(' + esc(x.description) + ')</span>' : '') + '</td><td class="st">' + esc(x.status) + '</td></tr>').join('') + '</table>' +
-      '<div class="main"><div class="pno">פריט ' + l.line_no + ' מתוך ' + o.lines.length + ' · ' + l.item_code + '</div>' +
+      '<div class="main"><div class="pno">פריט ' + l.line_no + '/' + o.lines.length + '</div>' +
       '<div class="big">' + esc(lineText(l) || 'פריט') + '</div>' +
-      (l.description ? '<div class="notes">' + esc(l.description) + '</div>' : '') +
-      '<div class="status">מצב: ' + esc(l.status) + '</div></div></div>').join('');
+      (l.description ? '<div class="desc">' + esc(l.description) + '</div>' : '') +
+      '<div class="st">מצב: ' + esc(l.status) + '</div></div>' +
+      (o.lines.length > 1 ? '<div class="others">' + o.lines.filter(x => x.item_code !== l.item_code).map(x =>
+        x.line_no + '. ' + esc(lineText(x) || x.item_code) + ' — ' + esc(x.status)).join(' · ') + '</div>' : '') +
+    '</div>').join('');
   const w = window.open('', '_blank');
   if (!w) { alert('הדפדפן חסם את חלון ההדפסה — אפשר חלונות קופצים לאתר'); return; }
   w.document.write('<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>הזמנה ' + o.order_number + '</title><style>' +
-    '@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;margin:0;color:#000}' +
-    '.box{border:2px solid #000;border-radius:6px;padding:7mm;height:134mm;box-sizing:border-box;margin-bottom:6mm;display:flex;flex-direction:column;gap:3mm;page-break-inside:avoid;overflow:hidden}' +
-    '.box:nth-child(2n){page-break-after:always}.hdr{display:flex;justify-content:space-between;gap:4mm;align-items:flex-start}' +
-    '.ord{font-size:16pt;font-weight:800}.cust{font-size:13pt;font-weight:700}.meta{font-size:10pt}.bc{height:16mm}' +
-    'table.all{width:100%;border-collapse:collapse;font-size:9pt}table.all td{border-bottom:1px solid #bbb;padding:.8mm 1.5mm}table.all .st{white-space:nowrap;text-align:left}' +
-    'table.all tr.me{font-weight:800;background:#e6e6e6}.n{color:#444}.main{flex:1;border-top:2px solid #000;padding-top:3mm;display:flex;flex-direction:column;gap:2mm}' +
-    '.pno{font-size:11pt}.big{font-size:26pt;font-weight:800;line-height:1.2}.notes{font-size:15pt;white-space:pre-wrap}.status{font-size:13pt;font-weight:700;margin-top:auto}' +
-    '</style></head><body>' + boxes + '<script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>');
+    '@page{size:A4;margin:8mm}body{font-family:Arial,sans-serif;margin:0;color:#000}' +
+    '.grid{display:grid;grid-template-columns:1fr 1fr;gap:4mm;align-items:start}' +
+    '.note{border:1.5px solid #000;border-radius:4px;padding:3mm;display:flex;flex-direction:column;gap:1.5mm;break-inside:avoid;page-break-inside:avoid;max-height:136mm;overflow:hidden}' +
+    '.hdr{display:flex;justify-content:space-between;gap:2mm;align-items:flex-start;font-size:8.5pt}.meta{font-size:7pt;color:#333}.bc{height:9mm;flex-shrink:0}' +
+    '.main{border-top:1px solid #000;padding-top:1.5mm;display:flex;flex-direction:column;gap:1mm}.pno{font-size:7.5pt}' +
+    '.big{font-size:15pt;font-weight:800;line-height:1.15}.desc{font-size:10.5pt;white-space:pre-wrap}.st{font-size:8.5pt;font-weight:700}' +
+    '.others{font-size:6.5pt;color:#444;border-top:1px dashed #999;padding-top:1mm;line-height:1.35}' +
+    '</style></head><body><div class="grid">' + notes + '</div><script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>');
   w.document.close();
 }
 function fmtDate(d){ return d ? d.split('-').reverse().join('.') : ''; }
@@ -394,17 +406,32 @@ async function loadMeta(){
 window.addEventListener('storage', e => { if (e.key === 'items-meta-changed') loadMeta().catch(() => {}); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) loadMeta().catch(() => {}); });
 
+// "🔔 לבדיקה": מסנן להזמנות פתוחות שהגיע תאריך הבדיקה שלהן
+let checkDueOnly = false;
+document.getElementById('checkDueBtn').addEventListener('click', () => { checkDueOnly = !checkDueOnly; loadList(); });
+function checkChip(o){
+  if (!o.check_date || o.supplied_at) return '';
+  const d = o.check_days;
+  if (d < 0) return '<span class="chip due">🔔 לבדוק — מאז ' + fmtDate(o.check_date) + '</span>';
+  if (d === 0) return '<span class="chip due">🔔 לבדוק היום</span>';
+  return '<span class="chip">🔔 לבדוק ב-' + fmtDate(o.check_date) + '</span>';
+}
 // --- רשימה ---
 async function loadList(){
   const list = document.getElementById('ordersList');
   const count = document.getElementById('listCount');
   count.textContent = 'טוען…';
-  const params = new URLSearchParams({ state: currentTab === 'supplied' ? 'supplied' : 'active' });
+  const params = new URLSearchParams({ state: currentTab === 'supplied' ? 'supplied' : currentTab === 'all' ? 'all' : 'active' });
+  if (checkDueOnly) params.set('check_due', '1');
   const q = document.getElementById('search').value.trim();
   if (q) params.set('q', q);
   if (document.getElementById('statusFilter').value) params.set('status_id', document.getElementById('statusFilter').value);
   try {
-    const { orders } = await api('/orders?' + params);
+    const { orders, check_due_count } = await api('/orders?' + params);
+    const cb = document.getElementById('checkDueBtn');
+    cb.classList.toggle('hidden', !check_due_count && !checkDueOnly);
+    cb.classList.toggle('on', checkDueOnly);
+    cb.textContent = checkDueOnly ? '🔔 מוצגות רק הזמנות לבדיקה — לחץ להצגת הכל' : '🔔 ' + check_due_count + ' הזמנות שהגיע הזמן לבדוק מה מצבן — לחץ להצגה';
     count.textContent = orders.length + ' הזמנות' + (currentTab === 'active' ? ' · ממוין לפי תאריך יעד (הדחוף למעלה)' : '');
     list.innerHTML = orders.map(o => {
       const due = dueInfo(o);
@@ -420,7 +447,7 @@ async function loadList(){
         '<div class="oc-head"><div><b>#' + o.order_number + ' · ' + esc(fullName(o)) + '</b> <span class="sub">' + esc(o.phone) + '</span></div>' + due.html + '</div>' +
         '<div class="sub">' + esc(items) + '</div>' +
         '<div class="chips">' + (allReady ? '<span class="badge-ready">✓ הכל מוכן לאיסוף</span>' : '') + chips +
-        (o.supplied_at ? '<span class="chip final">סופקה ' + new Date(o.supplied_at).toLocaleDateString('he-IL') + '</span>' : '') + payChip + '</div>' +
+        (o.supplied_at ? '<span class="chip final">סופקה ' + new Date(o.supplied_at).toLocaleDateString('he-IL') + '</span>' : '') + checkChip(o) + payChip + '</div>' +
         '</div>';
     }).join('') || '<div class="sub" style="text-align:center;padding:20px;">אין הזמנות</div>';
     list.querySelectorAll('.order-card').forEach(c => c.addEventListener('click', () => openDetail(c.dataset.n)));
@@ -436,6 +463,7 @@ document.getElementById('searchClear').addEventListener('click', () => {
 document.getElementById('statusFilter').addEventListener('change', loadList);
 
 function showTab(tab){
+  if (!confirmLeaveDetail()) return;
   currentTab = tab;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   document.getElementById('newPanel').classList.toggle('hidden', tab !== 'new');
@@ -515,6 +543,7 @@ document.getElementById('newPanel').addEventListener('submit', async e => {
     const data = await api('/orders', { method: 'POST', body: {
       customer: { first_name: document.getElementById('nFirst').value.trim(), last_name: document.getElementById('nLast').value.trim(), phone: document.getElementById('nPhone').value },
       target_date: document.getElementById('nTarget').value || null,
+      check_date: document.getElementById('nCheck').value || null,
       notes: document.getElementById('nNotes').value.trim(),
       price: document.getElementById('nPrice').value === '' ? null : +document.getElementById('nPrice').value,
       payment: +document.getElementById('nPaid').value > 0 ? { amount: +document.getElementById('nPaid').value } : null,
@@ -532,7 +561,33 @@ document.getElementById('newPanel').addEventListener('submit', async e => {
 
 // --- הזמנה (פרטים, פריטים, היסטוריה) ---
 const EVENT_LABELS = { order_created: 'נוצרה', order_edited: 'נערכה', line_added: 'נוסף פריט', line_deleted: 'נמחק פריט', line_edited: 'פריט נערך', status_changed: 'מצב', label_reprinted: 'הודפסה מדבקה', payment_added: '💰 תשלום', payment_deleted: '💰 תשלום נמחק', print_failed: '⚠️ הדפסה נכשלה' };
+// --- "יש שינויים שממתינים לשמירה" במסך הזמנה: משווים את השדות (פרטים, תשלום, פריט חדש) מול מה שנטען.
+// שדות הפריטים הקיימים (#dLines) נשמרים מיד בשינוי — לא נספרים.
+function detailFields(){ return [...document.querySelectorAll('#detailPanel input, #detailPanel select, #detailPanel textarea')].filter(el => !el.closest('#dLines')); }
+const dKey = (el, i) => el.id || (el.className + '|' + i);
+function snapshotDetail(){ const m = new Map(); detailFields().forEach((el, i) => m.set(dKey(el, i), el.value)); return m; }
+let detailBaseline = new Map();
+function isDetailDirty(){
+  if (document.getElementById('detailPanel').classList.contains('hidden')) return false;
+  for (const [k, v] of snapshotDetail()) if (detailBaseline.has(k) && detailBaseline.get(k) !== v) return true;
+  return false;
+}
+function syncDetailDirty(){ document.getElementById('dDirtyBar').classList.toggle('hidden', !isDetailDirty()); }
+document.getElementById('detailPanel').addEventListener('input', syncDetailDirty);
+document.getElementById('detailPanel').addEventListener('change', syncDetailDirty);
+function confirmLeaveDetail(){
+  if (!isDetailDirty()) return true;
+  if (!confirm('יש שינויים שממתינים לשמירה. לצאת בלי לשמור?')) return false;
+  detailBaseline = snapshotDetail(); syncDetailDirty();
+  return true;
+}
+window.addEventListener('beforeunload', e => { if (isDetailDirty()) { e.preventDefault(); e.returnValue = ''; } });
+document.getElementById('dDirtySave').addEventListener('click', () => document.getElementById('dSave').click());
+
 async function openDetail(n){
+  // טעינה מחדש של אותה הזמנה (אחרי שינוי מצב / תשלום) — שומרים את מה שהוקלד ועוד לא נשמר
+  const keep = openOrder && openOrder.order_number === String(n) && isDetailDirty() ? snapshotDetail() : null;
+  if (!keep && openOrder && openOrder.order_number !== String(n) && !confirmLeaveDetail()) return;
   try {
     const o = await api('/orders/' + encodeURIComponent(n));
     openOrder = o;
@@ -546,6 +601,7 @@ async function openDetail(n){
     document.getElementById('dPhone').value = o.phone || '';
     document.getElementById('dTarget').value = o.target_date || '';
     document.getElementById('dNotes').value = o.notes || '';
+    document.getElementById('dCheck').value = o.check_date || '';
     document.getElementById('dPrice').value = o.price == null ? '' : o.price;
     const bal = balanceInfo(o.price, o.paid_total);
     const balEl = document.getElementById('dBalance');
@@ -592,18 +648,26 @@ async function openDetail(n){
     add.innerHTML = lineFormHtml(true);
     add.querySelector('.rmLine').remove();
     wireTypeField(add);
+    detailBaseline = snapshotDetail();
+    if (keep) detailFields().forEach((el, i) => {
+      const k = dKey(el, i);
+      if (keep.has(k) && !/^dPay(Amount|Note)$/.test(el.id)) el.value = keep.get(k);
+      if (el.classList.contains('lType')) el.dispatchEvent(new Event('change'));
+    });
+    syncDetailDirty();
     document.getElementById('dEvents').innerHTML = o.events.map(ev =>
       '<div><b>' + esc(EVENT_LABELS[ev.action] || ev.action) + '</b>' + (ev.item_code ? ' · ' + ev.item_code : '') + (ev.detail ? ' · ' + esc(ev.detail) : '') +
       ' <span class="sub">' + new Date(ev.created_at).toLocaleString('he-IL') + '</span></div>').join('') || '<div class="sub">אין</div>';
   } catch (err) { alert(err.message); }
 }
-function closeDetail(){
+function closeDetail(force){
+  if (force !== true && !confirmLeaveDetail()) return;
   openOrder = null;
   document.getElementById('detailPanel').classList.add('hidden');
   document.getElementById('listPanel').classList.remove('hidden');
   loadList();
 }
-document.getElementById('dBack').addEventListener('click', closeDetail);
+document.getElementById('dBack').addEventListener('click', () => closeDetail());
 document.getElementById('dSave').addEventListener('click', async () => {
   const msg = document.getElementById('dMsg');
   msg.className = 'msg';
@@ -622,14 +686,15 @@ document.getElementById('dSave').addEventListener('click', async () => {
       price: document.getElementById('dPrice').value === '' ? null : +document.getElementById('dPrice').value,
       customer: { first_name: document.getElementById('dFirst').value.trim(), last_name: document.getElementById('dLast').value.trim(), phone: document.getElementById('dPhone').value },
       target_date: document.getElementById('dTarget').value || null,
+      check_date: document.getElementById('dCheck').value || null,
       notes: document.getElementById('dNotes').value,
     }});
-    closeDetail();
+    closeDetail(true);
   } catch (err) { msg.className = 'msg err'; msg.textContent = err.message; }
 });
 document.getElementById('dSupplyAll').addEventListener('click', async () => {
   if (!confirm('לסמן את כל הפריטים בהזמנה #' + openOrder.order_number + ' כסופקו?')) return;
-  try { await api('/orders/' + openOrder.order_number + '/supply-all', { method: 'POST' }); closeDetail(); } catch (err) { alert(err.message); }
+  try { await api('/orders/' + openOrder.order_number + '/supply-all', { method: 'POST' }); closeDetail(true); } catch (err) { alert(err.message); }
 });
 document.getElementById('dPayAdd').addEventListener('click', async () => {
   const amount = +document.getElementById('dPayAmount').value;
@@ -653,7 +718,7 @@ document.getElementById('dAddLineBtn').addEventListener('click', async () => {
 });
 document.getElementById('dDelete').addEventListener('click', async () => {
   if (!confirm('למחוק את הזמנה #' + openOrder.order_number + ' וכל הפריטים שלה? אי אפשר לבטל.')) return;
-  try { await api('/orders/' + openOrder.order_number, { method: 'DELETE' }); closeDetail(); } catch (err) { alert(err.message); }
+  try { await api('/orders/' + openOrder.order_number, { method: 'DELETE' }); closeDetail(true); } catch (err) { alert(err.message); }
 });
 
 // --- סריקה מהירה ---

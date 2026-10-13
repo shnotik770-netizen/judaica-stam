@@ -222,6 +222,8 @@
   .price-row{display:flex;gap:8px;align-items:center;}
   .price-row input{flex:1;min-width:0;}
   .price-row button{padding:8px 12px;font-size:13px;white-space:nowrap;}
+  .dirty-bar{position:sticky;bottom:8px;z-index:20;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#f6c343;color:#3d2c00;border-radius:11px;padding:10px 12px;font-weight:800;font-size:14px;box-shadow:0 3px 12px rgba(0,0,0,.25);}
+  .dirty-bar button{background:#3d2c00;color:#fff;padding:8px 12px;font-size:13px;white-space:nowrap;}
 </style>
 </head>
 <body>
@@ -401,6 +403,7 @@
       <button type="button" class="btn-primary" id="editSave">שמור שינויים</button>
     </div>
     <div class="msg" id="editMsg"></div>
+    <div id="editDirtyBar" class="dirty-bar hidden">⚠️ יש שינויים שממתינים לשמירה <button type="button" id="editDirtySave">שמור שינויים</button></div>
   </div>
 
   <div id="chatChoiceModal" class="modal-back hidden">
@@ -783,6 +786,7 @@ function partialInfo(b){
 // --- תצוגת כל ההזמנות ---
 let keepSearchOnce = false;
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  if (!confirmLeaveEdit()) return;
   document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
   t.classList.add('active');
   const tab = t.dataset.tab;
@@ -934,7 +938,37 @@ function itemTypeOptionsHtml(selected){
 let editOrderNumber = null;
 let editLocked = false;
 
+// --- "יש שינויים שממתינים לשמירה": משווים את ערכי השדות במסך העריכה מול מה שנטען מהשרת ---
+function editFields(){ return [...document.querySelectorAll('#editPanel input, #editPanel select, #editPanel textarea')]; }
+function fieldKey(el, i){ return el.id || (el.className + '|' + (el.dataset.code || el.closest('[data-code]')?.dataset.code || '') + '|' + i); }
+function snapshotEdit(){
+  const m = new Map();
+  editFields().forEach((el, i) => m.set(fieldKey(el, i), el.type === 'checkbox' || el.type === 'radio' ? el.checked : el.value));
+  return m;
+}
+let editBaseline = new Map();
+function isEditDirty(){
+  if (document.getElementById('editPanel').classList.contains('hidden') || editLocked) return false;
+  const now = snapshotEdit();
+  for (const [k, v] of now) if (editBaseline.has(k) && editBaseline.get(k) !== v) return true;
+  return false;
+}
+function syncEditDirty(){ document.getElementById('editDirtyBar').classList.toggle('hidden', !isEditDirty()); }
+document.getElementById('editPanel').addEventListener('input', syncEditDirty);
+document.getElementById('editPanel').addEventListener('change', syncEditDirty);
+// יציאה ממסך העריכה עם שינויים שלא נשמרו — שואלים
+function confirmLeaveEdit(){
+  if (!isEditDirty()) return true;
+  if (!confirm('יש שינויים שממתינים לשמירה. לצאת בלי לשמור?')) return false;
+  editBaseline = snapshotEdit(); syncEditDirty();
+  return true;
+}
+window.addEventListener('beforeunload', e => { if (isEditDirty()) { e.preventDefault(); e.returnValue = ''; } });
+document.getElementById('editDirtySave').addEventListener('click', () => document.getElementById('editSave').click());
+
 async function openEdit(orderNumber){
+  // טעינה מחדש של אותה הזמנה (אחרי הוספת תשלום וכו') — שומרים את מה שהוקלד ועוד לא נשמר
+  const keep = editOrderNumber === orderNumber && isEditDirty() ? snapshotEdit() : null;
   document.getElementById('listPanel').classList.add('hidden');
   document.getElementById('editPanel').classList.remove('hidden');
   document.getElementById('editMsg').className = 'msg';
@@ -945,6 +979,13 @@ async function openEdit(orderNumber){
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'שגיאה');
     renderEdit(data);
+    editBaseline = snapshotEdit();
+    if (keep) editFields().forEach((el, i) => {
+      const k = fieldKey(el, i);
+      if (!keep.has(k) || /^pay(Amount|Note)$/.test(el.id)) return;
+      if (el.type === 'checkbox' || el.type === 'radio') el.checked = keep.get(k); else el.value = keep.get(k);
+    });
+    syncEditDirty();
   } catch (err) {
     document.getElementById('editMsg').className = 'msg err';
     document.getElementById('editMsg').textContent = err.message;
@@ -1089,12 +1130,14 @@ async function deleteHistoryRow(code, { id, action, label }){
   }
 }
 
-function closeEdit(){
+function closeEdit(force){
+  if (force !== true && !confirmLeaveEdit()) return;
   document.getElementById('editPanel').classList.add('hidden');
+  syncEditDirty();
   document.getElementById('listPanel').classList.remove('hidden');
   loadList();
 }
-document.getElementById('editBack').addEventListener('click', closeEdit);
+document.getElementById('editBack').addEventListener('click', () => closeEdit());
 
 document.getElementById('editAddBag').addEventListener('click', async () => {
   try {
@@ -1151,7 +1194,7 @@ document.getElementById('editSave').addEventListener('click', async () => {
     if (!res.ok) throw new Error(data.error || 'שגיאה');
     await savePriceIfChanged();
     // נשמר — סוגרים את ההזמנה וחוזרים לרשימה
-    closeEdit();
+    closeEdit(true);
   } catch (err) {
     msg.className = 'msg err';
     msg.textContent = err.message;

@@ -180,6 +180,7 @@ router.post("/orders", asyncHandler(async (req, res) => {
   const cl = cleanLines(req.body?.lines);
   if (cl.error) { res.status(400).json({ error: cl.error }); return; }
   const target_date = req.body?.target_date || null;
+  const check_date = req.body?.check_date || null;
   const notes = String(req.body?.notes || "").trim().slice(0, 1000) || null;
   const price = cleanPrice(req.body?.price); // כמה הלקוח אמור לשלם — חובה בהזמנת פריטים
   if (price.error) { res.status(400).json({ error: price.error }); return; }
@@ -192,9 +193,9 @@ router.post("/orders", asyncHandler(async (req, res) => {
     await client.query("begin");
     const customerId = await upsertCustomer(client, cc.customer);
     order = (await client.query(
-      `insert into item_orders (order_number, customer_id, target_date, notes, price)
-       values (nextval('item_order_number_seq')::text, $1, $2, $3, $4) returning id, order_number`,
-      [customerId, target_date, notes, price.value]
+      `insert into item_orders (order_number, customer_id, target_date, notes, price, check_date)
+       values (nextval('item_order_number_seq')::text, $1, $2, $3, $4, $5) returning id, order_number`,
+      [customerId, target_date, notes, price.value, check_date]
     )).rows[0];
     if (pay.value > 0) {
       await client.query("insert into item_order_payments (item_order_id, amount, note) values ($1,$2,$3)",
@@ -228,6 +229,8 @@ router.get("/orders", asyncHandler(async (req, res) => {
       or exists (select 1 from item_order_lines l2 left join product_types p2 on p2.id = l2.product_type_id
                  where l2.item_order_id = o.id and (l2.item_code ilike $${i} or l2.item_name ilike $${i} or l2.custom_type ilike $${i} or l2.description ilike $${i} or p2.name ilike $${i})))`);
   }
+  // check_due=1 — רק הזמנות פתוחות שהגיע תאריך הבדיקה שלהן
+  if (req.query.check_due === "1") conds.push("o.supplied_at is null and o.check_date <= (now() at time zone 'Asia/Jerusalem')::date");
   if (req.query.status_id) {
     params.push(+req.query.status_id);
     conds.push(`exists (select 1 from item_order_lines l3 where l3.item_order_id = o.id and l3.status_id = $${params.length})`);
@@ -235,7 +238,7 @@ router.get("/orders", asyncHandler(async (req, res) => {
   const { rows } = await pool.query(
     `select o.order_number, o.target_date, o.notes, o.supplied_at, o.created_at, c.first_name, c.last_name, c.phone,
             o.price::float as price, (select coalesce(sum(p.amount), 0)::float from item_order_payments p where p.item_order_id = o.id) as paid_total,
-            (o.target_date - (now() at time zone 'Asia/Jerusalem')::date) as days_left,
+            (o.target_date - (now() at time zone 'Asia/Jerusalem')::date) as days_left, o.check_date, (o.check_date - (now() at time zone 'Asia/Jerusalem')::date) as check_days,
             coalesce(json_agg(json_build_object('item_code', l.item_code, 'line_no', l.line_no, 'product_type', coalesce(pt.name, l.custom_type),
               'item_name', l.item_name, 'description', l.description, 'quantity', l.quantity, 'status_id', l.status_id, 'status', s.name,
               'is_ready', s.is_ready, 'is_final', s.is_final) order by l.line_no) filter (where l.id is not null), '[]') as lines
@@ -246,11 +249,13 @@ router.get("/orders", asyncHandler(async (req, res) => {
      left join product_types pt on pt.id = l.product_type_id
      ${conds.length ? "where " + conds.join(" and ") : ""}
      group by o.id, c.id
-     order by ${state === "supplied" ? "o.supplied_at desc" : "o.target_date asc nulls last, o.created_at asc"}
+     order by ${state === "supplied" ? "o.supplied_at desc" : state === "all" ? "(o.supplied_at is not null), o.target_date asc nulls last, o.created_at desc" : "o.target_date asc nulls last, o.created_at asc"}
      limit 300`,
     params
   );
-  res.json({ orders: rows.map((o) => ({ ...o, created_at_hebrew: toHebrewDate(o.created_at) })) });
+  // כמה הזמנות פתוחות הגיע תאריך הבדיקה שלהן (לכפתור "🔔 לבדיקה")
+  const due = await pool.query("select count(*)::int as n from item_orders o where o.supplied_at is null and o.check_date <= (now() at time zone 'Asia/Jerusalem')::date");
+  res.json({ orders: rows.map((o) => ({ ...o, created_at_hebrew: toHebrewDate(o.created_at) })), check_due_count: due.rows[0].n });
 }));
 
 async function loadOrder(orderNumber) {
@@ -306,6 +311,11 @@ router.put("/orders/:n", asyncHandler(async (req, res) => {
       await client.query("update item_orders set target_date = $1 where id = $2", [td, order.id]);
       const before = order.target_date || null;
       if (before !== td) changes.push(`תאריך יעד: ${before || "—"} → ${td || "—"}`);
+    }
+    if (req.body?.check_date !== undefined) {
+      const cd = req.body.check_date || null;
+      await client.query("update item_orders set check_date = $1 where id = $2", [cd, order.id]);
+      if ((order.check_date || null) !== cd) changes.push(`תאריך לבדיקה: ${order.check_date || "—"} → ${cd || "—"}`);
     }
     if (req.body?.price !== undefined) {
       const price = cleanPrice(req.body.price);
