@@ -217,9 +217,12 @@
   .cat-flag input{width:16px;height:16px;}
   .cat-add{display:flex;gap:8px;}
   .cat-add button{white-space:nowrap;}
+  .site-strip{margin:-20px -16px 14px;padding:7px 16px;background:var(--accent);color:#fff;font-weight:800;font-size:13.5px;letter-spacing:.2px;text-align:center;}
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .site-strip{color:#111;} }
 </style>
 </head>
 <body>
+<div class="site-strip">📜 חנות יודאייקה — הזמנות סת"ם</div>
 <div class="wrap">
   <div id="qaBanner" class="hidden"><div><span class="qa-title"></span><small></small></div><div class="qa-actions"><button type="button" class="qa-cam hidden" id="qaPersonalBtn" title="כשמסומן — כל סריקה/לחיצה פותחת חלון לכתיבת הודעה אישית">☐ הודעה אישית</button><button type="button" class="qa-cam" id="qaCameraBtn">📷 מצלמה</button><button type="button" id="qaBannerCancel">יציאה</button></div></div>
   <div class="top-bar">

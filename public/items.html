@@ -8,17 +8,17 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap">
 <style>
   :root{
-    --bg:#f5f4f0; --surface:#ffffff; --surface-2:#f0eee7;
+    --bg:#f7f1f1; --surface:#ffffff; --surface-2:#f0eee7;
     --text:#211f1a; --text-muted:#6b6558; --border:#e2ddd0;
-    --accent:#1e3a5f; --accent-2:#163049; --accent-soft:#e8edf3;
+    --accent:#7a2e3a; --accent-2:#62242e; --accent-soft:#f3e5e7;
     --danger:#b3432f; --danger-soft:#fbeae6; --ok:#2f6b35; --ok-soft:#e9f3ea;
     --warn:#9a5b12; --warn-soft:#fdf0dc; --scan:#5b3d8f;
   }
   @media (prefers-color-scheme: dark){
     :root:not([data-theme="light"]){
-      --bg:#15171b; --surface:#1d2025; --surface-2:#242830;
+      --bg:#1a1516; --surface:#1d2025; --surface-2:#242830;
       --text:#eae7df; --text-muted:#9b968a; --border:#33363d;
-      --accent:#7fa8d9; --accent-2:#9cc0ee; --accent-soft:#1f2c3b;
+      --accent:#e29aa5; --accent-2:#ecb4bc; --accent-soft:#33212a;
       --danger:#e08a73; --danger-soft:#3a211c; --ok:#7fce89; --ok-soft:#17291b;
       --warn:#e7b26b; --warn-soft:#3a2c17; --scan:#b49be0;
     }
@@ -109,9 +109,12 @@
   /* ניהול רשימות (מוצג גם בדף הניהול של החנות) */
   .admin-list{display:flex;flex-direction:column;gap:6px;}
   .admin-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+  .site-strip{margin:-20px -16px 14px;padding:7px 16px;background:var(--accent);color:#fff;font-weight:800;font-size:13.5px;letter-spacing:.2px;text-align:center;}
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .site-strip{color:#111;} }
 </style>
 </head>
 <body>
+<div class="site-strip">🧾 הזמנות פריטים</div>
 <div id="scanFlash"></div>
 <div id="modal" class="modal-back hidden"><div class="card modal-card" id="modalBody"></div></div>
 <div class="wrap">

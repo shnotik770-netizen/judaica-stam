@@ -8,17 +8,17 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&display=swap">
 <style>
   :root{
-    --bg:#f5f4f0; --surface:#ffffff; --surface-2:#f0eee7;
+    --bg:#eef4f4; --surface:#ffffff; --surface-2:#f0eee7;
     --text:#211f1a; --text-muted:#6b6558; --border:#e2ddd0;
-    --accent:#1e3a5f; --accent-2:#163049; --accent-soft:#e8edf3;
+    --accent:#1f5f63; --accent-2:#174a4d; --accent-soft:#e1eeee;
     --danger:#b3432f; --danger-soft:#fbeae6; --ok:#2f6b35; --ok-soft:#e9f3ea;
     --warn:#8a5a1f; --warn-soft:#fbf0e3;
   }
   @media (prefers-color-scheme: dark){
     :root:not([data-theme="light"]){
-      --bg:#15171b; --surface:#1d2025; --surface-2:#242830;
+      --bg:#131a1b; --surface:#1d2025; --surface-2:#242830;
       --text:#eae7df; --text-muted:#9b968a; --border:#33363d;
-      --accent:#7fa8d9; --accent-2:#9cc0ee; --accent-soft:#1f2c3b;
+      --accent:#6cc3c8; --accent-2:#8fd6da; --accent-soft:#1a2e30;
       --danger:#e08a73; --danger-soft:#3a211c; --ok:#7fce89; --ok-soft:#17291b;
       --warn:#e3ab5c; --warn-soft:#2e2412;
     }
@@ -110,9 +110,12 @@
   #qaBanner .qa-actions{display:flex;gap:6px;flex-shrink:0;}
   #qaBanner button.qa-cam{background:rgba(255,255,255,.18);color:#fff;border:1px solid rgba(255,255,255,.7);padding:6px 10px;font-size:12px;}
   .supply-tag{background:#fdf0dc;color:#8a5a1f;border-radius:6px;padding:1px 6px;font-size:11.5px;font-weight:700;}
+  .site-strip{margin:-20px -16px 14px;padding:7px 16px;background:var(--accent);color:#fff;font-weight:800;font-size:13.5px;letter-spacing:.2px;text-align:center;}
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .site-strip{color:#111;} }
 </style>
 </head>
 <body>
+<div class="site-strip">🧰 דף האיסוף — מיכאל</div>
 <div class="wrap">
   <div id="qaBanner" class="hidden"><div><span class="qa-title"></span><small></small></div><div class="qa-actions"><button type="button" class="qa-cam" id="qaCameraBtn">📷 מצלמה</button><button type="button" id="qaBannerCancel">יציאה</button></div></div>
   <div class="top-bar">
