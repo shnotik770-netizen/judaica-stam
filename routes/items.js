@@ -179,8 +179,9 @@ router.post("/orders", asyncHandler(async (req, res) => {
   if (cl.error) { res.status(400).json({ error: cl.error }); return; }
   const target_date = req.body?.target_date || null;
   const notes = String(req.body?.notes || "").trim().slice(0, 1000) || null;
-  const price = cleanPrice(req.body?.price); // כמה הלקוח אמור לשלם
+  const price = cleanPrice(req.body?.price); // כמה הלקוח אמור לשלם — חובה בהזמנת פריטים
   if (price.error) { res.status(400).json({ error: price.error }); return; }
+  if (price.value == null) { res.status(400).json({ error: "חובה לרשום סכום לתשלום" }); return; }
   const pay = cleanPrice(req.body?.payment?.amount); // שולם בפועל כבר עכשיו
   if (pay.error) { res.status(400).json({ error: "סכום התשלום לא תקין" }); return; }
   const client = await pool.connect();
@@ -306,7 +307,7 @@ router.put("/orders/:n", asyncHandler(async (req, res) => {
     }
     if (req.body?.price !== undefined) {
       const price = cleanPrice(req.body.price);
-      if (price.error) { await client.query("rollback"); res.status(400).json({ error: price.error }); return; }
+      if (price.error || price.value == null) { await client.query("rollback"); res.status(400).json({ error: price.error || "חובה לרשום סכום לתשלום" }); return; }
       await client.query("update item_orders set price = $1 where id = $2", [price.value, order.id]);
       const before = order.price == null ? null : Number(order.price);
       if (before !== price.value) changes.push(`סכום לתשלום: ${before ?? "—"} → ${price.value ?? "—"}`);
