@@ -116,7 +116,8 @@
   .check-btn.on{background:var(--warn);color:#fff;}
   .dirty-bar{position:sticky;bottom:8px;z-index:20;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#f6c343;color:#3d2c00;border-radius:11px;padding:10px 12px;font-weight:800;font-size:14px;box-shadow:0 3px 12px rgba(0,0,0,.25);}
   .dirty-bar button{background:#3d2c00;color:#fff;padding:8px 12px;font-size:13px;white-space:nowrap;}
-  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+  .tiles{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;}
+  .heb-hint{font-size:12px;color:var(--text-muted);margin-top:3px;min-height:15px;}
   .tiles.st{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));}
   .tile{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px;text-align:center;cursor:pointer;}
   .tile:hover{border-color:var(--accent);}
@@ -195,9 +196,9 @@
     </div>
     <div class="grid2">
       <div><label>טלפון</label><input id="nPhone" type="tel" inputmode="numeric"></div>
-      <div><label>תאריך יעד — עד מתי הכל אמור להיות מוכן</label><input id="nTarget" type="date"></div>
+      <div><label>תאריך יעד — עד מתי הכל אמור להיות מוכן</label><input id="nTarget" type="date"><div class="heb-hint" data-for="nTarget"></div></div>
     </div>
-    <div><label>🔔 תאריך לבדיקה — מתי לבדוק מה מצב ההזמנה</label><input id="nCheck" type="date"></div>
+    <div><label>🔔 תאריך לבדיקה — מתי לבדוק מה מצב ההזמנה</label><input id="nCheck" type="date"><div class="heb-hint" data-for="nCheck"></div></div>
     <div class="sub hidden" id="nSuggest"></div>
     <div><label>הערות</label><input id="nNotes" placeholder="לא חובה"></div>
     <div class="grid2">
@@ -222,11 +223,11 @@
     </div>
     <div class="grid2">
       <div><label>טלפון</label><input id="dPhone" type="tel" inputmode="numeric"></div>
-      <div><label>תאריך יעד</label><input id="dTarget" type="date"></div>
+      <div><label>תאריך יעד</label><input id="dTarget" type="date"><div class="heb-hint" data-for="dTarget"></div></div>
     </div>
     <div class="grid2">
       <div><label>הערות</label><input id="dNotes"></div>
-      <div><label>🔔 תאריך לבדיקה</label><input id="dCheck" type="date"></div>
+      <div><label>🔔 תאריך לבדיקה</label><input id="dCheck" type="date"><div class="heb-hint" data-for="dCheck"></div></div>
     </div>
     <div class="pay-box">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><b>💰 תשלום</b><span id="dBalance" style="font-weight:700;"></span></div>
@@ -334,7 +335,7 @@ function printOrderSheet(o){
   const html = '<div class="top"><div><h1>הזמנה #' + o.order_number + '</h1>' +
       '<div class="cust">' + esc(fullName(o)) + ' · ' + esc(o.phone) + '</div>' +
       '<div class="meta">נוצרה ' + esc(o.created_at_hebrew || '') + ' · ' + new Date(o.created_at).toLocaleDateString('he-IL') +
-      (o.target_date ? ' · <b>יעד: ' + fmtDate(o.target_date) + '</b>' : '') + (o.supplied_at ? ' · סופקה ' + new Date(o.supplied_at).toLocaleDateString('he-IL') : '') + '</div>' +
+      (o.target_date ? ' · <b>יעד: ' + fmtDate(o.target_date) + '</b>' : '') + (o.supplied_at ? ' · סופקה ' + fmtDay(o.supplied_at) : '') + '</div>' +
       (o.notes ? '<div class="meta">הערות: ' + esc(o.notes) + '</div>' : '') + '</div>' +
       '<img class="bc" src="/api/label/' + o.order_number + '" alt=""></div>' +
     '<table><thead><tr><th>#</th><th>סוג</th><th>שם הפריט</th><th>הערות / הסבר</th><th>מצב</th></tr></thead><tbody>' +
@@ -375,7 +376,35 @@ function printA4(o, lines){
     '</style></head><body><div class="grid">' + notes + '</div><script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>');
   w.document.close();
 }
-function fmtDate(d){ return d ? d.split('-').reverse().join('.') : ''; }
+// --- תאריך עברי (באותיות, כמו בדף החנות): "י״ז חשוון תשפ״ז" ---
+function gematria(n){
+  n = n % 1000;
+  let out = '';
+  for (const [v, ch] of [[400, 'ת'], [300, 'ש'], [200, 'ר'], [100, 'ק']]) while (n >= v) { out += ch; n -= v; }
+  if (n === 15) out += 'טו'; else if (n === 16) out += 'טז';
+  else {
+    const tens = ['', 'י', 'כ', 'ל', 'מ', 'נ', 'ס', 'ע', 'פ', 'צ'], units = ['', 'א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ז', 'ח', 'ט'];
+    out += tens[Math.floor(n / 10)] + units[n % 10];
+  }
+  return out.length > 1 ? out.slice(0, -1) + '״' + out.slice(-1) : out + '׳';
+}
+const hebFmt = new Intl.DateTimeFormat('he-u-ca-hebrew', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Jerusalem' });
+// d: 'YYYY-MM-DD' או Date / מחרוזת זמן
+function hebDate(d){
+  if (!d) return '';
+  try {
+    const date = typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) ? new Date(d + 'T12:00:00+03:00') : new Date(d);
+    const parts = hebFmt.formatToParts(date);
+    const get = (t) => parts.find(x => x.type === t)?.value || '';
+    return gematria(+get('day')) + ' ' + get('month') + ' ' + gematria(+get('year'));
+  } catch (e) { return ''; }
+}
+// מתחת לכל שדה תאריך — התאריך העברי
+function syncHebHints(){ document.querySelectorAll('.heb-hint').forEach(h => { h.textContent = hebDate(document.getElementById(h.dataset.for).value); }); }
+['nTarget', 'nCheck', 'dTarget', 'dCheck'].forEach(id => document.getElementById(id).addEventListener('input', syncHebHints));
+// תאריך לתצוגה: עברי + לועזי
+function fmtDate(d){ return d ? hebDate(d) + ' (' + d.split('-').reverse().join('.') + ')' : ''; }
+function fmtDay(ts){ return ts ? hebDate(ts) + ' (' + new Date(ts).toLocaleDateString('he-IL') + ')' : ''; }
 // טלפון — אותו נרמול/בדיקה כמו בשרת (lib/phone.js)
 function normalizePhone(v){
   let d = String(v || '').replace(/\D/g, '');
@@ -493,7 +522,7 @@ async function loadList(){
         '<div class="oc-head"><div><b>#' + o.order_number + ' · ' + esc(fullName(o)) + '</b> <span class="sub">' + esc(o.phone) + '</span></div>' + due.html + '</div>' +
         '<div class="sub">' + esc(items) + '</div>' +
         '<div class="chips">' + (allReady ? '<span class="badge-ready">✓ הכל מוכן לאיסוף</span>' : '') + chips +
-        (o.supplied_at ? '<span class="chip final">סופקה ' + new Date(o.supplied_at).toLocaleDateString('he-IL') + '</span>' : '') + checkChip(o) + payChip + '</div>' +
+        (o.supplied_at ? '<span class="chip final">סופקה ' + fmtDay(o.supplied_at) + '</span>' : '') + checkChip(o) + payChip + '</div>' +
         '</div>';
     }).join('') || '<div class="sub" style="text-align:center;padding:20px;">אין הזמנות</div>';
     list.querySelectorAll('.order-card').forEach(c => c.addEventListener('click', () => openDetail(c.dataset.n)));
@@ -543,7 +572,6 @@ async function loadDashboard(){
       '<div class="tiles">' +
         '<div class="tile" data-go="all"><div class="n">' + t.open_orders + '</div><div class="l">הזמנות פתוחות</div></div>' +
         '<div class="tile ok"><div class="n">' + t.ready_orders + '</div><div class="l">✓ מוכנות לאיסוף</div></div>' +
-        '<div class="tile' + (t.balance_due > 0 ? ' warn' : '') + '"><div class="n">' + ils(t.balance_due) + '</div><div class="l">💰 יתרה לגבייה</div></div>' +
       '</div>' +
       '<div class="card dash"><b>📦 פריטים לפי מצב</b><div class="sub" style="margin:0;">בהזמנות שעוד לא סופקו · לחיצה מציגה את ההזמנות</div><div class="tiles st">' +
         shownStatuses.map(s => '<div class="tile' + (s.is_ready ? ' ok' : '') + '" data-status="' + s.id + '"><div class="n">' + s.items + '</div><div class="l">' + esc(s.name) + '</div>' +
@@ -643,7 +671,7 @@ document.getElementById('newPanel').addEventListener('submit', async e => {
     msg.textContent = 'הזמנה #' + data.order_number + ' נוצרה (' + data.item_codes.length + ' פריטים).';
     // שואלים אילו פריטים להדפיס מדבקה
     api('/orders/' + data.order_number).then(askLabels, () => {});
-    e.target.reset(); lastLookup = '';
+    e.target.reset(); lastLookup = ''; syncHebHints();
     document.getElementById('nSuggest').classList.add('hidden');
     document.getElementById('nLines').innerHTML = ''; addNewLine();
   } catch (err) { msg.className = 'msg err'; msg.textContent = err.message; }
@@ -693,12 +721,13 @@ async function openDetail(n){
     document.getElementById('dTarget').value = o.target_date || '';
     document.getElementById('dNotes').value = o.notes || '';
     document.getElementById('dCheck').value = o.check_date || '';
+    syncHebHints();
     document.getElementById('dPrice').value = o.price == null ? '' : o.price;
     const bal = balanceInfo(o.price, o.paid_total);
     const balEl = document.getElementById('dBalance');
     balEl.textContent = bal ? bal.text : ''; balEl.style.color = bal && bal.due ? 'var(--danger)' : 'var(--ok)';
     document.getElementById('dPayments').innerHTML = o.payments.map(p =>
-      '<div class="pay-row"><span><b>' + ils(p.amount) + '</b>' + (p.note ? ' · ' + esc(p.note) : '') + ' <span class="sub">(' + new Date(p.created_at).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }) + ')</span></span>' +
+      '<div class="pay-row"><span><b>' + ils(p.amount) + '</b>' + (p.note ? ' · ' + esc(p.note) : '') + ' <span class="sub">(' + hebDate(p.created_at) + ' · ' + new Date(p.created_at).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }) + ')</span></span>' +
       '<button type="button" class="btn-danger payDel" data-id="' + p.id + '" style="padding:2px 8px;">🗑</button></div>').join('') || '<div class="sub">עדיין לא נרשם תשלום</div>';
     document.querySelectorAll('#dPayments .payDel').forEach(b => b.onclick = async () => {
       if (!confirm('למחוק את התשלום הזה?')) return;
@@ -712,7 +741,7 @@ async function openDetail(n){
       '<input class="lName" value="' + esc(l.item_name || '') + '" placeholder="שם הפריט">' +
       '<input class="lDesc desc" value="' + esc(l.description || '') + '" placeholder="הערות / הסבר"></div>' +
       '<select class="status">' + statusOptions(l.status_id) + '</select>' +
-      '<div class="sub">במצב הזה מאז ' + new Date(l.status_changed_at).toLocaleString('he-IL') + '</div></div>'
+      '<div class="sub">במצב הזה מאז ' + hebDate(l.status_changed_at) + ' · ' + new Date(l.status_changed_at).toLocaleString('he-IL') + '</div></div>'
     ).join('') || '<div class="sub">אין פריטים</div>';
     linesBox.querySelectorAll('.line').forEach(el => {
       const code = el.dataset.code;
@@ -748,7 +777,7 @@ async function openDetail(n){
     syncDetailDirty();
     document.getElementById('dEvents').innerHTML = o.events.map(ev =>
       '<div><b>' + esc(EVENT_LABELS[ev.action] || ev.action) + '</b>' + (ev.item_code ? ' · ' + ev.item_code : '') + (ev.detail ? ' · ' + esc(ev.detail) : '') +
-      ' <span class="sub">' + new Date(ev.created_at).toLocaleString('he-IL') + '</span></div>').join('') || '<div class="sub">אין</div>';
+      ' <span class="sub">' + hebDate(ev.created_at) + ' · ' + new Date(ev.created_at).toLocaleString('he-IL') + '</span></div>').join('') || '<div class="sub">אין</div>';
   } catch (err) { alert(err.message); }
 }
 function closeDetail(force){
