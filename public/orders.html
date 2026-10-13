@@ -764,7 +764,11 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
     syncSearchClear();
     loadList(); loadSummary();
   }
-  if (tab === 'admin') showAdminSection(currentAdminSection);
+  if (tab === 'admin') {
+    // לחיצה רגילה על "ניהול" תמיד פותחת את הודעות ה-SMS; קיצור מכוון (התראת הדפסה, התכתבות) קובע adminJump לפני הלחיצה
+    showAdminSection(adminJump || 'inbox');
+    adminJump = null;
+  }
 }));
 
 const STATUS_BADGE = {
@@ -804,7 +808,7 @@ async function loadSummary(){
   }
 }
 document.getElementById('printFailuresBanner').addEventListener('click', () => {
-  currentAdminSection = 'log';
+  adminJump = 'log';
   document.querySelector('.tab[data-tab="admin"]').click();
 });
 
@@ -1765,8 +1769,9 @@ document.getElementById('customerSearch').addEventListener('input', () => {
   clearTimeout(window._customerSearchDebounce);
   window._customerSearchDebounce = setTimeout(loadCustomers, 400);
 });
-// --- ניהול: 4 כפתורים בראש הדף, כל אחד מציג את החלק שלו (ברירת מחדל: יומן פעולות) ---
-let currentAdminSection = 'log';
+// --- ניהול: כפתורים בראש הדף, כל אחד מציג את החלק שלו (ברירת מחדל: הודעות SMS) ---
+let currentAdminSection = 'inbox'; // ברירת מחדל: הודעות SMS
+let adminJump = null;
 const ADMIN_SECTION_LOADERS = { fix: () => {}, sms: () => loadSettings(), customers: () => loadCustomers(), log: () => loadActivityLog(), inbox: () => { closeSmsThread(); loadSmsInbox(); } };
 function showAdminSection(section){
   currentAdminSection = section;
@@ -2013,7 +2018,7 @@ function chooseChat(phone, name){
 async function openChatWith(phone, name){
   const digits = String(phone || '').replace(/\D/g, '').replace(/^972/, '0');
   if (!digits) return;
-  currentAdminSection = 'inbox';
+  adminJump = 'inbox';
   document.querySelector('.tab[data-tab="admin"]').click();
   await loadSmsInbox(true);
   const t = smsThreads.find(x => x.phone === digits);
