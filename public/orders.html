@@ -204,7 +204,7 @@
   .modal-back.hidden{display:none;}
   .modal-card{width:100%;max-width:480px;}
   .kind-toggle{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
-  .kind-btn{padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;}
+  .kind-btn{padding:7px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;}
   .kind-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
   .supply-tag{background:#fdf0dc;color:#8a5a1f;border-radius:6px;padding:1px 6px;font-size:11.5px;font-weight:700;}
 </style>
@@ -241,9 +241,8 @@
   <div class="sub">כל שקית מודפסת מיד כמדבקה נפרדת עם ברקוד — אפשר להוסיף כמה שקיות שרוצים באותה הזמנה.</div>
 
   <form class="card" id="orderForm" autocomplete="off">
-    <div class="kind-toggle">
-      <button type="button" class="kind-btn active" data-kind="customer">👤 הזמנת לקוח</button>
-      <button type="button" class="kind-btn" data-kind="supply">📦 אספקה מסופר</button>
+    <div style="display:flex;justify-content:flex-end;">
+      <button type="button" class="kind-btn" id="supplyToggle">📦 אספקה מסופר</button>
     </div>
     <div class="supplier-note hidden" id="supplyHint">אספקה מסופר — הפרטים הם של <b>הסופר</b>. מיכאל יכול להחזיר חלק מהכמות בכל פעם (למשל 50 מתוך 100), ואין עדכון ללקוח.</div>
     <div class="grid2">
@@ -731,13 +730,16 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
 let orderKind = 'customer';
 function setOrderKind(kind){
   orderKind = kind;
-  document.querySelectorAll('.kind-btn').forEach(b => b.classList.toggle('active', b.dataset.kind === kind));
+  const t = document.getElementById('supplyToggle');
+  t.classList.toggle('active', kind === 'supply');
+  t.textContent = kind === 'supply' ? '✓ אספקה מסופר — לחץ לחזרה להזמנת לקוח' : '📦 אספקה מסופר';
   document.querySelectorAll('#orderForm .customer-only').forEach(el => el.classList.toggle('hidden', kind === 'supply'));
   document.getElementById('supplyHint').classList.toggle('hidden', kind !== 'supply');
   document.getElementById('firstName').placeholder = document.getElementById('lastName').placeholder =
     kind === 'supply' ? 'שם הסופר — פרטי או משפחה' : 'פרטי או משפחה — אחד מהם חובה';
 }
-document.querySelectorAll('.kind-btn').forEach(b => b.addEventListener('click', () => setOrderKind(b.dataset.kind)));
+// ברירת מחדל: הזמנת לקוח. הכפתור מעביר לאספקה מסופר (ולחיצה נוספת מחזירה)
+document.getElementById('supplyToggle').addEventListener('click', () => setOrderKind(orderKind === 'supply' ? 'customer' : 'supply'));
 function supplyTag(b){ return b.kind === 'supply' ? '<span class="supply-tag">אספקה מסופר</span> ' : ''; }
 // אספקה: כמה כבר חזרו מתוך הכמות (כשחזר חלק)
 function partialInfo(b){
