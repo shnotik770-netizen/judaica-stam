@@ -309,17 +309,24 @@ function askLabels(order){
 }
 // הדפסת A4 מהמחשב: לכל פריט ריבוע — פרטי ההזמנה, רשימת כל הפריטים ומצבם בקטן, והפריט עצמו בגדול
 function askPrintA4(order){
-  const body = openModal('<b>🖨️ הדפסת A4 · הזמנה #' + order.order_number + '</b><div class="sub" style="margin:0;">פתק קטן לכל פריט (כרבע עמוד).</div>' +
-    '<div class="pick-list"><label><input type="radio" name="a4" value="__sheet"><span><b>📄 דף הזמנה מלא</b> — כל ההזמנה בדף אחד, בלי חלוקה לפתקים</span></label>' +
-    '<label><input type="radio" name="a4" value="" checked><span><b>פתקים לכל הפריטים</b> (' + order.lines.length + ')</span></label>' +
-    order.lines.map(l => '<label><input type="radio" name="a4" value="' + l.item_code + '"><span>רק פריט ' + l.line_no + ' · ' + esc(lineText(l) || l.item_code) + '</span></label>').join('') + '</div>' +
-    '<div style="display:flex;gap:8px;"><button type="button" class="btn-primary" id="mA4">🖨️ הדפס</button><button type="button" class="btn-ghost" id="mCancel">ביטול</button></div>');
+  // שתי אפשרויות: דף הזמנה מלא, או פתקים לפריטים שמסמנים (כמה שרוצים)
+  const body = openModal('<b>🖨️ הדפסת A4 · הזמנה #' + order.order_number + '</b>' +
+    '<button type="button" class="btn-ghost" id="mSheet" style="text-align:right;"><b>📄 דף הזמנה מלא</b> — כל ההזמנה בדף אחד, בלי חלוקה לפתקים</button>' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b style="font-size:14px;">או פתקים (כרבע עמוד) לפריטים:</b>' +
+    '<button type="button" class="btn-ghost btn-small" id="mToggle">סמן / בטל הכל</button></div>' +
+    '<div class="pick-list">' + order.lines.map(l => '<label><input type="checkbox" value="' + l.item_code + '" checked><span>פריט ' + l.line_no + ' · ' + esc(lineText(l) || l.item_code) + '</span></label>').join('') + '</div>' +
+    '<div style="display:flex;gap:8px;"><button type="button" class="btn-primary" id="mA4">🖨️ הדפס פתקים לנבחרים</button><button type="button" class="btn-ghost" id="mCancel">ביטול</button></div>');
   body.querySelector('#mCancel').onclick = closeModal;
+  body.querySelector('#mSheet').onclick = () => { closeModal(); printOrderSheet(order); };
+  body.querySelector('#mToggle').onclick = () => {
+    const boxes = [...body.querySelectorAll('.pick-list input')];
+    const all = boxes.every(b => b.checked); boxes.forEach(b => { b.checked = !all; });
+  };
   body.querySelector('#mA4').onclick = () => {
-    const code = body.querySelector('input[name=a4]:checked').value;
+    const codes = [...body.querySelectorAll('.pick-list input:checked')].map(b => b.value);
+    if (!codes.length) { alert('צריך לסמן לפחות פריט אחד'); return; }
     closeModal();
-    if (code === '__sheet') printOrderSheet(order);
-    else printA4(order, code ? order.lines.filter(l => l.item_code === code) : order.lines);
+    printA4(order, order.lines.filter(l => codes.includes(l.item_code)));
   };
 }
 // דף A4 אחד עם כל ההזמנה: פרטי לקוח והזמנה, טבלת כל הפריטים (סוג, שם, הערות, מצב) ותשלום
