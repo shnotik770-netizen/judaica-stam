@@ -111,6 +111,7 @@
   @media (max-width:480px){.pay-form{grid-template-columns:1fr 1fr;} .pay-form button{grid-column:1 / -1;}}
   .pay-row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;background:var(--surface);border-radius:8px;padding:6px 10px;}
   .chip.due{background:var(--danger-soft);color:var(--danger);}
+  .type-field{display:flex;flex-direction:column;gap:6px;}
   /* ניהול רשימות (מוצג גם בדף הניהול של החנות) */
   .admin-list{display:flex;flex-direction:column;gap:6px;}
   .admin-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
@@ -340,9 +341,24 @@ function checkPhone(el, msgEl){
 
 const activeTypes = () => META.product_types.filter(t => t.active);
 const activeStatuses = () => META.statuses.filter(s => s.active);
+// selected: id מהרשימה, או '__other' לסוג שהוקלד ידנית
 function typeOptions(selected){
   const list = META.product_types.filter(t => t.active || t.id === selected);
-  return '<option value="">סוג מוצר…</option>' + list.map(t => '<option value="' + t.id + '"' + (t.id === selected ? ' selected' : '') + '>' + esc(t.name) + '</option>').join('');
+  return '<option value="">סוג פריט…</option>' + list.map(t => '<option value="' + t.id + '"' + (t.id === selected ? ' selected' : '') + '>' + esc(t.name) + '</option>').join('') +
+    '<option value="__other"' + (selected === '__other' ? ' selected' : '') + '>✏️ סוג אחר — להקליד</option>';
+}
+// שדה סוג: בחירה מהרשימה, ו"סוג אחר" פותח שדה הקלדה
+function typeFieldHtml(selected, customType){
+  const other = selected === '__other';
+  return '<div class="type-field"><select class="lType">' + typeOptions(selected) + '</select>' +
+    '<input class="lTypeOther' + (other ? '' : ' hidden') + '" placeholder="איזה סוג?" value="' + esc(customType || '') + '"></div>';
+}
+function wireTypeField(el){
+  const sel = el.querySelector('.lType'), other = el.querySelector('.lTypeOther');
+  sel.addEventListener('change', () => {
+    other.classList.toggle('hidden', sel.value !== '__other');
+    if (sel.value === '__other') other.focus();
+  });
 }
 function statusOptions(selected){
   const list = META.statuses.filter(s => s.active || s.id === selected);
@@ -366,7 +382,17 @@ async function loadMeta(){
   const keep = sf.value;
   sf.innerHTML = '<option value="">כל המצבים</option>' + META.statuses.map(s => '<option value="' + s.id + '">יש פריט במצב: ' + esc(s.name) + '</option>').join('');
   sf.value = keep;
+  // רשימות פתוחות בטפסים — מתעדכנות במקום, בלי לאבד את מה שנבחר
+  document.querySelectorAll('select.lType').forEach(sel => {
+    const v = sel.value; sel.innerHTML = typeOptions(v === '__other' ? '__other' : (v ? +v : null)); sel.value = v;
+  });
+  document.querySelectorAll('select.lStatus, select.status').forEach(sel => {
+    const v = +sel.value; sel.innerHTML = statusOptions(v); sel.value = String(v);
+  });
 }
+// עדכון ברשימות בניהול (בלשונית אחרת) — מרעננים מיד; ובכל חזרה ללשונית הזו
+window.addEventListener('storage', e => { if (e.key === 'items-meta-changed') loadMeta().catch(() => {}); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loadMeta().catch(() => {}); });
 
 // --- רשימה ---
 async function loadList(){
@@ -428,7 +454,7 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
 function lineFormHtml(withStatus){
   return '<div class="line"><div class="line-head"><b class="sub" style="font-weight:700;">פריט</b>' +
     '<button type="button" class="btn-danger rmLine">הסר</button></div>' +
-    '<div class="line-grid"><select class="lType">' + typeOptions(null) + '</select>' +
+    '<div class="line-grid">' + typeFieldHtml(null) +
     '<input class="lName" placeholder="שם הפריט">' +
     '<input class="lDesc desc" placeholder="הערות / הסבר (מידה, צבע, רקמה…)"></div>' +
     (withStatus ? '<div><label>מצב התחלתי</label><select class="lStatus">' + statusOptions(activeStatuses()[0]?.id) + '</select></div>' : '') + '</div>';
@@ -437,12 +463,14 @@ function addNewLine(){
   const box = document.getElementById('nLines');
   box.insertAdjacentHTML('beforeend', lineFormHtml(true));
   const el = box.lastElementChild;
+  wireTypeField(el);
   el.querySelector('.rmLine').onclick = () => { el.remove(); if (!box.children.length) addNewLine(); };
 }
 document.getElementById('nAddLine').addEventListener('click', addNewLine);
 function readLine(el){
   return {
-    product_type_id: el.querySelector('.lType').value || null,
+    product_type_id: el.querySelector('.lType').value && el.querySelector('.lType').value !== '__other' ? el.querySelector('.lType').value : null,
+    custom_type: el.querySelector('.lType').value === '__other' ? el.querySelector('.lTypeOther').value.trim() : '',
     item_name: el.querySelector('.lName').value.trim(),
     description: el.querySelector('.lDesc').value.trim(),
     status_id: el.querySelector('.lStatus') ? +el.querySelector('.lStatus').value : undefined,
@@ -481,7 +509,7 @@ document.getElementById('newPanel').addEventListener('submit', async e => {
   if (document.getElementById('nPrice').value.trim() === '') {
     msg.className = 'msg err'; msg.textContent = 'חובה לרשום סכום לתשלום (כמה הלקוח אמור לשלם).'; document.getElementById('nPrice').focus(); return;
   }
-  const bad = lines.findIndex(l => !l.product_type_id && !l.item_name);
+  const bad = lines.findIndex(l => !l.product_type_id && !l.custom_type && !l.item_name);
   if (bad >= 0) { msg.className = 'msg err'; msg.textContent = 'פריט ' + (bad + 1) + ': צריך לבחור סוג פריט או לכתוב שם פריט.'; return; }
   try {
     const data = await api('/orders', { method: 'POST', body: {
@@ -533,7 +561,7 @@ async function openDetail(n){
     linesBox.innerHTML = o.lines.map(l =>
       '<div class="line" data-code="' + l.item_code + '"><div class="line-head"><b>' + l.item_code + ' · פריט ' + l.line_no + '</b>' +
       '<div style="display:flex;gap:6px;"><button type="button" class="btn-ghost btn-small reprint">🖨️ מדבקה</button><button type="button" class="btn-danger del">מחק</button></div></div>' +
-      '<div class="line-grid"><select class="lType">' + typeOptions(l.product_type_id) + '</select>' +
+      '<div class="line-grid">' + typeFieldHtml(l.product_type_id || (l.custom_type ? '__other' : null), l.custom_type) +
       '<input class="lName" value="' + esc(l.item_name || '') + '" placeholder="שם הפריט">' +
       '<input class="lDesc desc" value="' + esc(l.description || '') + '" placeholder="הערות / הסבר"></div>' +
       '<select class="status">' + statusOptions(l.status_id) + '</select>' +
@@ -547,9 +575,11 @@ async function openDetail(n){
         catch (err) { alert(err.message); }
       });
       // שינוי סוג/שם/הערות — נשמר ביציאה מהשדה
-      ['lType', 'lName', 'lDesc'].forEach(cls => el.querySelector('.' + cls).addEventListener('change', async () => {
+      wireTypeField(el);
+      ['lType', 'lTypeOther', 'lName', 'lDesc'].forEach(cls => el.querySelector('.' + cls).addEventListener('change', async () => {
         const v = readLine(el);
-        try { await api('/lines/' + code, { method: 'PUT', body: { product_type_id: v.product_type_id, item_name: v.item_name, description: v.description } }); }
+        if (el.querySelector('.lType').value === '__other' && !v.custom_type) return; // מחכים שיקלידו את הסוג
+        try { await api('/lines/' + code, { method: 'PUT', body: { product_type_id: v.product_type_id, custom_type: v.custom_type, item_name: v.item_name, description: v.description } }); }
         catch (err) { alert(err.message); }
       }));
       el.querySelector('.reprint').onclick = async () => { try { await api('/lines/' + code + '/reprint', { method: 'POST' }); alert('המדבקה נשלחה להדפסה'); } catch (err) { alert(err.message); } };
@@ -561,6 +591,7 @@ async function openDetail(n){
     const add = document.getElementById('dAddLine');
     add.innerHTML = lineFormHtml(true);
     add.querySelector('.rmLine').remove();
+    wireTypeField(add);
     document.getElementById('dEvents').innerHTML = o.events.map(ev =>
       '<div><b>' + esc(EVENT_LABELS[ev.action] || ev.action) + '</b>' + (ev.item_code ? ' · ' + ev.item_code : '') + (ev.detail ? ' · ' + esc(ev.detail) : '') +
       ' <span class="sub">' + new Date(ev.created_at).toLocaleString('he-IL') + '</span></div>').join('') || '<div class="sub">אין</div>';
@@ -613,7 +644,7 @@ document.getElementById('dLabels').addEventListener('click', () => askLabels(ope
 document.getElementById('dPrintA4').addEventListener('click', () => askPrintA4(openOrder));
 document.getElementById('dAddLineBtn').addEventListener('click', async () => {
   const v = readLine(document.querySelector('#dAddLine .line'));
-  if (!v.product_type_id && !v.item_name) { alert('צריך לבחור סוג פריט או לכתוב שם פריט'); return; }
+  if (!v.product_type_id && !v.custom_type && !v.item_name) { alert('צריך לבחור סוג פריט או לכתוב שם פריט'); return; }
   try {
     const r = await api('/orders/' + openOrder.order_number + '/lines', { method: 'POST', body: v });
     if (confirm('הפריט נוסף (' + r.item_code + '). להדפיס לו מדבקה?')) await api('/lines/' + r.item_code + '/reprint', { method: 'POST' });

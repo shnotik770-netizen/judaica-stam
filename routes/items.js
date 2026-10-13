@@ -96,7 +96,7 @@ async function finalStatusId(client = pool) {
 
 // --- מדבקה לפריט ---
 const LINE_SELECT = `
-  select l.*, pt.name as product_type, s.name as status, s.is_ready, s.is_final, s.position as status_position,
+  select l.*, coalesce(pt.name, l.custom_type) as product_type, s.name as status, s.is_ready, s.is_final, s.position as status_position,
          o.order_number, o.target_date, o.created_at as order_created_at, o.id as order_id,
          c.first_name, c.last_name, c.phone,
          (select count(*) from item_order_lines x where x.item_order_id = o.id)::int as line_count
@@ -128,9 +128,11 @@ function cleanLines(lines) {
     const description = String(l?.description || "").trim().slice(0, 1000); // הערות / הסבר
     const item_name = String(l?.item_name || "").trim().slice(0, 200);
     const product_type_id = l?.product_type_id ? +l.product_type_id : null;
-    if (!product_type_id && !item_name) return { error: `פריט ${i + 1}: צריך לבחור סוג פריט או לכתוב שם פריט` };
+    // סוג "אחר" שהוקלד — רק כשלא נבחר סוג מהרשימה
+    const custom_type = product_type_id ? null : String(l?.custom_type || "").trim().slice(0, 100) || null;
+    if (!product_type_id && !custom_type && !item_name) return { error: `פריט ${i + 1}: צריך לבחור סוג פריט או לכתוב שם פריט` };
     const quantity = Math.max(1, Math.min(999, parseInt(l?.quantity, 10) || 1));
-    out.push({ description: description || null, item_name: item_name || null, product_type_id, quantity, status_id: l?.status_id ? +l.status_id : null });
+    out.push({ description: description || null, item_name: item_name || null, product_type_id, custom_type, quantity, status_id: l?.status_id ? +l.status_id : null });
   }
   return { lines: out };
 }
@@ -163,9 +165,9 @@ async function insertLines(client, order, lines, startNo) {
   for (const [i, l] of lines.entries()) {
     const no = startNo + i;
     const { rows } = await client.query(
-      `insert into item_order_lines (item_order_id, line_no, item_code, product_type_id, item_name, description, quantity, status_id)
-       values ($1,$2,$3,$4,$5,$6,$7,$8) returning id, item_code`,
-      [order.id, no, lineCode(order.order_number, no), l.product_type_id, l.item_name, l.description, l.quantity, l.status_id || defaultStatus]
+      `insert into item_order_lines (item_order_id, line_no, item_code, product_type_id, custom_type, item_name, description, quantity, status_id)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id, item_code`,
+      [order.id, no, lineCode(order.order_number, no), l.product_type_id, l.custom_type, l.item_name, l.description, l.quantity, l.status_id || defaultStatus]
     );
     created.push(rows[0]);
   }
@@ -224,7 +226,7 @@ router.get("/orders", asyncHandler(async (req, res) => {
     const i = params.length;
     conds.push(`(o.order_number ilike $${i} or c.first_name ilike $${i} or c.last_name ilike $${i} or c.phone ilike $${i}
       or exists (select 1 from item_order_lines l2 left join product_types p2 on p2.id = l2.product_type_id
-                 where l2.item_order_id = o.id and (l2.item_code ilike $${i} or l2.item_name ilike $${i} or l2.description ilike $${i} or p2.name ilike $${i})))`);
+                 where l2.item_order_id = o.id and (l2.item_code ilike $${i} or l2.item_name ilike $${i} or l2.custom_type ilike $${i} or l2.description ilike $${i} or p2.name ilike $${i})))`);
   }
   if (req.query.status_id) {
     params.push(+req.query.status_id);
@@ -234,7 +236,7 @@ router.get("/orders", asyncHandler(async (req, res) => {
     `select o.order_number, o.target_date, o.notes, o.supplied_at, o.created_at, c.first_name, c.last_name, c.phone,
             o.price::float as price, (select coalesce(sum(p.amount), 0)::float from item_order_payments p where p.item_order_id = o.id) as paid_total,
             (o.target_date - (now() at time zone 'Asia/Jerusalem')::date) as days_left,
-            coalesce(json_agg(json_build_object('item_code', l.item_code, 'line_no', l.line_no, 'product_type', pt.name,
+            coalesce(json_agg(json_build_object('item_code', l.item_code, 'line_no', l.line_no, 'product_type', coalesce(pt.name, l.custom_type),
               'item_name', l.item_name, 'description', l.description, 'quantity', l.quantity, 'status_id', l.status_id, 'status', s.name,
               'is_ready', s.is_ready, 'is_final', s.is_final) order by l.line_no) filter (where l.id is not null), '[]') as lines
      from item_orders o
@@ -404,7 +406,12 @@ router.put("/lines/:code", asyncHandler(async (req, res) => {
     await client.query("begin");
     if (req.body?.status_id) await setLineStatus(client, line, +req.body.status_id);
     const sets = [], params = [line.id], changes = [];
-    if (req.body?.product_type_id !== undefined) { params.push(req.body.product_type_id ? +req.body.product_type_id : null); sets.push(`product_type_id = $${params.length}`); changes.push("סוג"); }
+    if (req.body?.product_type_id !== undefined) {
+      const ptId = req.body.product_type_id ? +req.body.product_type_id : null;
+      params.push(ptId); sets.push(`product_type_id = $${params.length}`);
+      params.push(ptId ? null : String(req.body.custom_type || "").trim().slice(0, 100) || null); sets.push(`custom_type = $${params.length}`);
+      changes.push("סוג");
+    }
     if (req.body?.item_name !== undefined) { params.push(String(req.body.item_name || "").trim().slice(0, 200) || null); sets.push(`item_name = $${params.length}`); changes.push("שם"); }
     if (req.body?.description !== undefined) { params.push(String(req.body.description || "").trim().slice(0, 300) || null); sets.push(`description = $${params.length}`); changes.push("הערות"); }
     if (req.body?.quantity !== undefined) { params.push(Math.max(1, parseInt(req.body.quantity, 10) || 1)); sets.push(`quantity = $${params.length}`); changes.push("כמות"); }

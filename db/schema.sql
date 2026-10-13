@@ -294,3 +294,5 @@ create table if not exists item_order_payments (
   created_at timestamptz not null default now()
 );
 create index if not exists idx_item_order_payments_order on item_order_payments(item_order_id);
+-- סוג פריט "אחר" שהוקלד ידנית (כשאין product_type_id)
+alter table item_order_lines add column if not exists custom_type text;

@@ -1852,7 +1852,10 @@ function renderCatList(boxId, path, rows, flags){
     row.querySelector('.cat-del').onclick = () => { if (confirm('למחוק את "' + rows[i].name + '"?')) itemsApi('/' + path + '/' + id, 'DELETE').then(loadCatalog, catError); };
   });
 }
-async function loadCatalog(){
+// אחרי כל שינוי ברשימות — מודיעים לדף "הזמנות פריטים" הפתוח (לשונית אחרת) לרענן אותן מיד
+function notifyItemsMetaChanged(){ try { localStorage.setItem('items-meta-changed', String(Date.now())); } catch (e) {} }
+async function loadCatalog(changed){
+  if (changed !== false) notifyItemsMetaChanged();
   document.getElementById('catMsg').className = 'msg';
   try {
     const meta = await itemsApi('/meta');
@@ -1873,7 +1876,7 @@ async function loadCatalog(){
 // --- ניהול: כפתורים בראש הדף, כל אחד מציג את החלק שלו (ברירת מחדל: הודעות SMS) ---
 let currentAdminSection = 'inbox'; // ברירת מחדל: הודעות SMS
 let adminJump = null;
-const ADMIN_SECTION_LOADERS = { catalog: () => loadCatalog(), fix: () => {}, sms: () => loadSettings(), customers: () => loadCustomers(), log: () => loadActivityLog(), inbox: () => { closeSmsThread(); loadSmsInbox(); } };
+const ADMIN_SECTION_LOADERS = { catalog: () => loadCatalog(false), fix: () => {}, sms: () => loadSettings(), customers: () => loadCustomers(), log: () => loadActivityLog(), inbox: () => { closeSmsThread(); loadSmsInbox(); } };
 function showAdminSection(section){
   currentAdminSection = section;
   document.querySelectorAll('.admin-nav-btn').forEach(b => b.classList.toggle('active', b.dataset.section === section));
