@@ -206,3 +206,11 @@ alter table sms_reads alter column last_read_in drop not null;
 -- כדי שאותו לקוח יימצא תמיד (שיוך לפי טלפון, קיבוץ שקיות בדיווח SMS). אידמפוטנטי.
 update customers set phone = regexp_replace(regexp_replace(phone, '\D', '', 'g'), '^972', '0')
 where phone is distinct from regexp_replace(regexp_replace(phone, '\D', '', 'g'), '^972', '0');
+
+-- אספקה מסופר: הזמנה שאינה של לקוח — סופר הביא כמות (למשל 100 מזוזות) לבדיקה אצל מיכאל, והפרטים ב-customers הם של הסופר.
+-- מיכאל יכול להחזיר חלק בכל פעם: returned_quantity סופר כמה כבר חזרו; השקית "חזרה" רק כשחזרה כל הכמות.
+-- בשקית אספקה אין לקוח לעדכן/למסור לו — כשהכל חזר היא נסגרת (customer_collected_at = "נקלט בחנות").
+alter table orders add column if not exists kind text not null default 'customer';
+alter table orders drop constraint if exists orders_kind_check;
+alter table orders add constraint orders_kind_check check (kind in ('customer', 'supply'));
+alter table bags add column if not exists returned_quantity int not null default 0;

@@ -89,8 +89,8 @@ function labelItemText(bag) {
 function printBagLabel(order_number, customer, bag, orderDate) {
   const text = [
     `הזמנה ${order_number} | שקית ${bag.bag_code}`,
-    `${[customer.first_name, customer.last_name].filter(Boolean).join(" ")} · ${customer.phone}`,
-    ...(customer.address ? [customer.address] : []), // שורת כתובת — רק אם יש
+    (customer.kind === "supply" ? "אספקה מסופר: " : "") + `${[customer.first_name, customer.last_name].filter(Boolean).join(" ")} · ${customer.phone}`,
+    ...(customer.address && customer.kind !== "supply" ? [customer.address] : []), // שורת כתובת — רק אם יש
     toHebrewDate(orderDate || new Date()),
     labelItemText(bag),
   ].join("\n");
@@ -116,6 +116,7 @@ async function isOrderLocked(orderId) {
 // (אם כבר קיים לקוח עם אותו טלפון, מעדכנים את הפרטים שלו ומשתמשים באותו רשומה; אחרת יוצרים חדש).
 router.post("/", asyncHandler(async (req, res) => {
   const { customer, bags } = req.body || {};
+  const kind = req.body?.kind === "supply" ? "supply" : "customer"; // supply = אספקה מסופר (הפרטים = של הסופר)
   // שם: חובה פרטי *או* משפחה (לא חייבים את שניהם)
   if (customer) { customer.first_name = String(customer.first_name || "").trim(); customer.last_name = String(customer.last_name || "").trim(); }
   if (!customer?.phone || (!customer.first_name && !customer.last_name) || !Array.isArray(bags) || bags.length === 0) {
@@ -156,7 +157,7 @@ router.post("/", asyncHandler(async (req, res) => {
     await client.query("begin");
 
     // "הובא ע\"י" מולא — לא משייכים ללקוח קיים לפי טלפון (גם אם תואם), תמיד לקוח חדש
-    const broughtBy = String(req.body.brought_by || "").trim().slice(0, 200) || null;
+    const broughtBy = kind === "supply" ? null : String(req.body.brought_by || "").trim().slice(0, 200) || null;
     const existing = broughtBy
       ? { rows: [] }
       : await client.query("select id from customers where phone = $1 order by created_at desc limit 1", [customer.phone]);
@@ -179,9 +180,9 @@ router.post("/", asyncHandler(async (req, res) => {
     }
 
     const order = await client.query(
-      `insert into orders (order_number, customer_id, notes, target_date, brought_by)
-       values (nextval('order_number_seq')::text,$1,$2,$3,$4) returning id, order_number`,
-      [customerId, req.body.notes || null, req.body.target_date || null, broughtBy]
+      `insert into orders (order_number, customer_id, notes, target_date, brought_by, kind)
+       values (nextval('order_number_seq')::text,$1,$2,$3,$4,$5) returning id, order_number`,
+      [customerId, req.body.notes || null, req.body.target_date || null, broughtBy, kind]
     );
     const orderId = order.rows[0].id;
     const order_number = order.rows[0].order_number;
@@ -207,9 +208,9 @@ router.post("/", asyncHandler(async (req, res) => {
     await client.query("commit");
 
     // הדפסת מדבקה לכל שקית ברגע יצירת ההזמנה — Code128, אותו קוד מספרי שהוחזר בכל שקית.
-    for (const b of createdBags) printBagLabel(order_number, customer, b);
+    for (const b of createdBags) printBagLabel(order_number, { ...customer, kind }, b);
 
-    logActivity(null, order_number, "order_created", `${createdBags.length} שקיות` + (broughtBy ? ` · הובא ע"י ${broughtBy}` : ""));
+    logActivity(null, order_number, "order_created", (kind === "supply" ? "אספקה מסופר · " : "") + `${createdBags.length} שקיות` + (broughtBy ? ` · הובא ע"י ${broughtBy}` : ""));
     if (initialPayment) {
       logActivity(null, order_number, "payment_added", `₪${initialPayment.amount}` + (initialPayment.note ? ` · ${initialPayment.note}` : "") + " · בשעת ההזמנה");
     }
@@ -312,8 +313,8 @@ router.get("/bags", asyncHandler(async (req, res) => {
   const where = conditions.length ? "where " + conditions.join(" and ") : "";
 
   const { rows } = await pool.query(
-    `select o.order_number, o.brought_by, c.first_name, c.last_name, c.phone,
-            b.bag_code, b.item_type, b.item_type_note, b.quantity, b.variant, b.mezuzah_cases, b.supplier_note, b.status,
+    `select o.order_number, o.brought_by, o.kind, c.first_name, c.last_name, c.phone,
+            b.bag_code, b.item_type, b.item_type_note, b.quantity, b.returned_quantity, b.variant, b.mezuzah_cases, b.supplier_note, b.status,
             b.picked_up_at, b.imported_at, b.ready_at, b.returned_at, b.delivered_direct_at, b.delivered_direct_note, b.customer_notified_at, b.customer_collected_at, b.created_at,
             (select max(r.received_at) from bag_reports r where r.bag_id = b.id) as report_received_at,
             (select coalesce(sum(p.amount), 0)::float from order_payments p where p.order_id = o.id) as paid_total,
@@ -334,7 +335,7 @@ const SCAN_DUPLICATE_WINDOW_MS = 60 * 1000;
 async function loadBagForScan(code) {
   const { rows } = await pool.query(
     `select b.id, b.bag_code, b.item_type, b.quantity, b.status, b.customer_notified_at, b.customer_collected_at,
-            o.order_number, c.first_name, c.last_name, c.phone
+            o.order_number, o.kind, c.first_name, c.last_name, c.phone
      from bags b
      join orders o on o.id = b.order_id
      join customers c on c.id = o.customer_id
@@ -352,7 +353,7 @@ async function findReturnedGroup(phone, { onlyUnnotified }) {
   const { rows } = await pool.query(
     `select b.id, b.bag_code, b.item_type, b.quantity, o.order_number
      from bags b join orders o on o.id = b.order_id join customers c on c.id = o.customer_id
-     where c.phone = $1 and b.status = 'returned' ${cond}`,
+     where c.phone = $1 and b.status = 'returned' and o.kind = 'customer' ${cond}`,
     [phone]
   );
   return rows;
@@ -371,6 +372,10 @@ router.get("/sms-preview", asyncHandler(async (req, res) => {
   const bag = await loadBagForScan(String(req.query.bag_code || ""));
   if (!bag) {
     res.status(404).json({ error: "קוד לא מוכר" });
+    return;
+  }
+  if (bag.kind === "supply") {
+    res.status(409).json({ error: "אספקה מסופר — אין לקוח לעדכן" });
     return;
   }
   if (bag.status !== "returned") {
@@ -409,6 +414,10 @@ router.post("/scan", asyncHandler(async (req, res) => {
       continue;
     }
     const customer = { first_name: bag.first_name, last_name: bag.last_name, phone: bag.phone };
+    if (bag.kind === "supply") {
+      results.push({ bag_code: code, ok: false, error: "אספקה מסופר — אין לקוח לעדכן או למסור לו" });
+      continue;
+    }
 
     if (bag.status !== "returned") {
       results.push({ bag_code: code, ok: false, error: "השקית עדיין לא חזרה מהספק" });
@@ -500,9 +509,9 @@ const withHebrewDates = (rows) => rows.map((r) => ({ ...r, created_at_hebrew: to
 
 // פעולות שמשנות את מצב השקית — מחיקה שלהן מההיסטוריה מחזירה את השקית למצב שלפניהן.
 // (השוואות זמן נעשות ב-SQL מול השורה עצמה: Date של JS מאבד את המיקרו-שניות של timestamptz.)
-const STATE_ACTIONS = ["picked_up", "released", "returned", "delivered_direct", "customer_notified", "customer_collected", "manual_fix"];
+const STATE_ACTIONS = ["picked_up", "released", "returned", "returned_partial", "delivered_direct", "customer_notified", "customer_collected", "manual_fix"];
 const STATE_ACTION_LABELS = {
-  delivered_direct: "נמסר ללקוח ע\"י מיכאל", picked_up: "נאסף ע\"י מיכאל", released: "מוכן אצל מיכאל (שוחרר מהתוכנה)", returned: "הוחזר ממיכאל", customer_notified: "עודכן ללקוח",
+  delivered_direct: "נמסר ללקוח ע\"י מיכאל", picked_up: "נאסף ע\"י מיכאל", released: "מוכן אצל מיכאל (שוחרר מהתוכנה)", returned: "הוחזר ממיכאל", returned_partial: "הוחזר חלקית ממיכאל", customer_notified: "עודכן ללקוח",
   customer_collected: "נאסף ע\"י לקוח", manual_fix: "תיקון ידני",
   label_reprinted: "מדבקה הודפסה שוב", print_failed: "הדפסה נכשלה", bag_added: "שקית נוספה",
 };
@@ -700,7 +709,7 @@ router.get("/", asyncHandler(async (req, res) => {
 // (imported_at) או כבר חזרה (returned) — לא ניתן יותר לערוך/למחוק את ההזמנה או שקיות שלה.
 router.get("/:order_number", asyncHandler(async (req, res) => {
   const o = await pool.query(
-    `select o.id, o.order_number, o.status, o.brought_by, c.first_name, c.last_name, c.phone, c.address, c.supplier_customer_number
+    `select o.id, o.order_number, o.status, o.brought_by, o.kind, c.first_name, c.last_name, c.phone, c.address, c.supplier_customer_number
      from orders o join customers c on c.id = o.customer_id
      where o.order_number = $1`,
     [req.params.order_number]
@@ -710,7 +719,7 @@ router.get("/:order_number", asyncHandler(async (req, res) => {
     return;
   }
   const bags = await pool.query(
-    `select bag_code, item_type, item_type_note, quantity, variant, mezuzah_cases, supplier_note, supplier_note_at, status, result, picked_up_at, returned_at, imported_at, ready_at,
+    `select bag_code, item_type, item_type_note, quantity, returned_quantity, variant, mezuzah_cases, supplier_note, supplier_note_at, status, result, picked_up_at, returned_at, imported_at, ready_at,
             delivered_direct_at, delivered_direct_note,
             customer_notified_at, customer_collected_at,
             (select max(r.received_at) from bag_reports r where r.bag_id = bags.id) as report_received_at
@@ -882,7 +891,7 @@ router.post("/:order_number/bags", asyncHandler(async (req, res) => {
     return;
   }
   const o = await pool.query(
-    `select o.id, o.order_number, c.first_name, c.last_name, c.phone, c.address
+    `select o.id, o.order_number, o.kind, c.first_name, c.last_name, c.phone, c.address
      from orders o join customers c on c.id = o.customer_id where o.order_number = $1`,
     [req.params.order_number]
   );
@@ -996,7 +1005,7 @@ router.put("/bags/:bag_code/force-status", asyncHandler(async (req, res) => {
 // עדיין), או שהמדבקה הפיזית אבדה/נקרעה. מותר גם על הזמנה נעולה — לא משנה שום מצב, רק מדפיס שוב.
 router.post("/bags/:bag_code/reprint", asyncHandler(async (req, res) => {
   const { rows } = await pool.query(
-    `select b.bag_code, b.item_type, b.quantity, b.variant, b.mezuzah_cases, o.order_number, o.created_at as order_created_at,
+    `select b.bag_code, b.item_type, b.quantity, b.variant, b.mezuzah_cases, o.order_number, o.kind, o.created_at as order_created_at,
             c.first_name, c.last_name, c.phone, c.address
      from bags b join orders o on o.id = b.order_id join customers c on c.id = o.customer_id
      where b.bag_code = $1`,

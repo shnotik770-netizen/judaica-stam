@@ -14,7 +14,7 @@ const DUPLICATE_WINDOW_MS = 60 * 1000;
 const COLLECTION_WINDOW_MS = 30 * 60 * 1000; // חלון קיבוץ לאיסוף: סריקה בפער של עד 30 דקות מצטרפת לאותו איסוף
 
 const BAG_SELECT = `
-  select b.*, o.order_number, o.notes as order_notes, o.brought_by,
+  select b.*, o.order_number, o.notes as order_notes, o.brought_by, o.kind,
          c.first_name, c.last_name, c.phone, c.address, c.supplier_customer_number,
          col.collection_number, col.started_at as collection_started_at,
          (select max(r.received_at) from bag_reports r where r.bag_id = b.id) as report_received_at
@@ -42,6 +42,10 @@ function serializeBag(bag) {
     bag_code: bag.bag_code,
     order_number: bag.order_number,
     brought_by: bag.brought_by || null, // מי הביא את הפריטים בשם הלקוח (לא חובה)
+    // "customer" = הזמנת לקוח; "supply" = אספקה מסופר (customer = פרטי הסופר) — אפשר להחזיר חלק מהכמות בכל פעם
+    kind: bag.kind || "customer",
+    returned_quantity: bag.returned_quantity || 0, // כמה כבר הוחזרו לחנות (באספקה: מצטבר בהחזרות חלקיות)
+    remaining_quantity: bag.status === "with_supplier" ? bag.quantity - (bag.returned_quantity || 0) : 0,
     status: bag.status,
     stage: bagStage(bag),
     item_type: bag.item_type,
@@ -144,21 +148,43 @@ async function pickupBag(bag) {
   logActivity(bag.bag_code, bag.order_number, "picked_up", null, prev);
 }
 
-// מבצע בפועל החזרה
-async function returnBag(bag, result) {
+// כמה עוד אצל הספק (באספקה מסופר — אחרי החזרות חלקיות)
+const remainingOf = (bag) => bag.quantity - (bag.returned_quantity || 0);
+
+// בודק כמות להחזרה. הזמנת לקוח — תמיד הכל (quantity מתעלמים). אספקה — 1..נותר; בלי quantity = כל מה שנותר.
+// מחזיר {qty} או {error}
+function returnQuantity(bag, quantity) {
+  const remaining = remainingOf(bag);
+  if (bag.kind !== "supply" || quantity == null || quantity === "") return { qty: remaining };
+  const q = Number(quantity);
+  if (!Number.isInteger(q) || q < 1 || q > remaining) return { error: `כמות להחזרה חייבת להיות בין 1 ל-${remaining}` };
+  return { qty: q };
+}
+
+// מבצע בפועל החזרה. באספקה מסופר qty יכול להיות חלק מהכמות: השקית נשארת "אצל הספק" עד שחוזר הכל,
+// ואז נסגרת (customer_collected_at — אין לקוח לעדכן; הפריטים נקלטו בחנות).
+async function returnBag(bag, result, qty = remainingOf(bag)) {
   const prev = (await snapshotBagStates([bag.bag_code])).get(bag.bag_code);
+  const total = (bag.returned_quantity || 0) + qty;
+  if (bag.kind === "supply" && total < bag.quantity) {
+    await pool.query("update bags set returned_quantity=$2, updated_at=now() where id=$1", [bag.id, total]);
+    logActivity(bag.bag_code, bag.order_number, "returned_partial", `חזרו ${qty} · סה"כ ${total} מתוך ${bag.quantity}`, prev);
+    return;
+  }
   await pool.query(
-    `update bags set status='returned', returned_at=now(), result=$2, updated_at=now() where id=$1`,
-    [bag.id, result ? JSON.stringify(result) : null]
+    `update bags set status='returned', returned_at=now(), result=$2, returned_quantity=quantity,
+       customer_collected_at = case when $3 then now() else customer_collected_at end, updated_at=now() where id=$1`,
+    [bag.id, result ? JSON.stringify(result) : null, bag.kind === "supply"]
   );
   // בלי פירוט ביומן — הדוח עצמו נשמר ב-result ומוצג בכפתור "דוח ממיכאל"
-  logActivity(bag.bag_code, bag.order_number, "returned", null, prev);
+  logActivity(bag.bag_code, bag.order_number, "returned",
+    bag.kind === "supply" ? `אספקה: חזרו ${qty} · סה"כ ${bag.quantity} מתוך ${bag.quantity} — הכל חזר` : null, prev);
 }
 
 // עדכון סטטוס — מזהה לבד אם זו מסירה (איסוף) או החזרה, לפי מצב השקית הנוכחי. לסריקה בודדת
 // (מכשיר/מצלמה) — מתאים כי פיזית ברור אם סורקים בביקור איסוף או בביקור החזרה.
 router.post("/scan", asyncHandler(async (req, res) => {
-  const { bag_code, result } = req.body || {};
+  const { bag_code, result, quantity } = req.body || {};
   if (!bag_code) {
     res.status(400).json({ error: "bag_code נדרש" });
     return;
@@ -184,9 +210,11 @@ router.post("/scan", asyncHandler(async (req, res) => {
       res.json({ action: "duplicate", bag: serializeBag(bag) });
       return;
     }
-    await returnBag(bag, result);
+    const rq = returnQuantity(bag, quantity);
+    if (rq.error) { res.status(400).json({ error: rq.error }); return; }
+    await returnBag(bag, result, rq.qty);
     const fresh = await loadBag(bag_code);
-    res.json({ action: "returned", bag: serializeBag(fresh) });
+    res.json({ action: fresh.status === "returned" ? "returned" : "returned_partial", returned_now: rq.qty, bag: serializeBag(fresh) });
     return;
   }
 
@@ -201,8 +229,11 @@ router.post("/scan", asyncHandler(async (req, res) => {
 // סימון מרובה מרשימה (במקום סריקה) — מיכאל יכול לעבור על "ממתין לאיסוף"/"מה אצלי" ולסמן
 // V על כמה שקיות בבת אחת, במקום לסרוק כל אחת. action נקבע לפי הרשימה שבה מסמנים (לא ניחוש).
 router.post("/bulk-scan", asyncHandler(async (req, res) => {
-  const { bag_codes, action, force } = req.body || {};
-  if (!Array.isArray(bag_codes) || bag_codes.length === 0) {
+  // bag_codes: קודים, או באספקה מסופר {bag_code, quantity} להחזרה חלקית. ask_quantity (דף האתר): שקית אספקה
+  // בלי quantity לא מוחזרת אלא מחזירה needs_quantity, כדי שהדף ישאל כמה. בלי הדגל — בלי quantity = כל מה שנותר.
+  const { action, force, ask_quantity } = req.body || {};
+  const bag_codes = Array.isArray(req.body?.bag_codes) ? req.body.bag_codes : [];
+  if (bag_codes.length === 0) {
     res.status(400).json({ error: "bag_codes נדרש" });
     return;
   }
@@ -212,7 +243,9 @@ router.post("/bulk-scan", asyncHandler(async (req, res) => {
   }
 
   const results = [];
-  for (const code of bag_codes) {
+  for (const entry of bag_codes) {
+    const code = typeof entry === "object" && entry ? String(entry.bag_code || "") : String(entry);
+    const quantity = typeof entry === "object" && entry ? entry.quantity : undefined;
     try {
       const bag = await loadBag(code);
       if (!bag) {
@@ -235,7 +268,19 @@ router.post("/bulk-scan", asyncHandler(async (req, res) => {
           results.push({ bag_code: code, ok: false, needs_confirm: true, error: "שקית זו לא דווחה כנבדקה" });
           continue;
         }
-        await returnBag(bag, bag.result || null);
+        if (bag.kind === "supply" && ask_quantity && (quantity == null || quantity === "")) {
+          results.push({ bag_code: code, ok: false, needs_quantity: true, error: "כמה חוזרות?", bag: serializeBag(bag) });
+          continue;
+        }
+        const rq = returnQuantity(bag, quantity);
+        if (rq.error) {
+          results.push({ bag_code: code, ok: false, error: rq.error });
+          continue;
+        }
+        await returnBag(bag, bag.result || null, rq.qty);
+        const fresh = await loadBag(code);
+        results.push({ bag_code: code, ok: true, partial: fresh.status !== "returned", returned_now: rq.qty, bag: serializeBag(fresh) });
+        continue;
       }
       const fresh = await loadBag(code);
       results.push({ bag_code: code, ok: true, bag: serializeBag(fresh) });

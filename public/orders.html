@@ -203,6 +203,10 @@
   .modal-back{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:center;justify-content:center;padding:16px;}
   .modal-back.hidden{display:none;}
   .modal-card{width:100%;max-width:480px;}
+  .kind-toggle{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .kind-btn{padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;}
+  .kind-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .supply-tag{background:#fdf0dc;color:#8a5a1f;border-radius:6px;padding:1px 6px;font-size:11.5px;font-weight:700;}
 </style>
 </head>
 <body>
@@ -237,21 +241,26 @@
   <div class="sub">כל שקית מודפסת מיד כמדבקה נפרדת עם ברקוד — אפשר להוסיף כמה שקיות שרוצים באותה הזמנה.</div>
 
   <form class="card" id="orderForm" autocomplete="off">
+    <div class="kind-toggle">
+      <button type="button" class="kind-btn active" data-kind="customer">👤 הזמנת לקוח</button>
+      <button type="button" class="kind-btn" data-kind="supply">📦 אספקה מסופר</button>
+    </div>
+    <div class="supplier-note hidden" id="supplyHint">אספקה מסופר — הפרטים הם של <b>הסופר</b>. מיכאל יכול להחזיר חלק מהכמות בכל פעם (למשל 50 מתוך 100), ואין עדכון ללקוח.</div>
     <div class="grid2">
       <div class="field"><label>שם פרטי</label><input id="firstName" placeholder="פרטי או משפחה — אחד מהם חובה"></div>
       <div class="field"><label>שם משפחה</label><input id="lastName" placeholder="פרטי או משפחה — אחד מהם חובה"></div>
     </div>
     <div class="grid2">
       <div class="field"><label>טלפון</label><input required id="phone" type="tel" inputmode="numeric"></div>
-      <div class="field"><label>כתובת</label><input id="address" placeholder="לא חובה"></div>
+      <div class="field customer-only"><label>כתובת</label><input id="address" placeholder="לא חובה"></div>
     </div>
-    <div class="field"><label>הובא ע"י</label><input id="broughtBy" placeholder="לא חובה — אם מישהו אחר הביא בשם הלקוח"></div>
+    <div class="field customer-only"><label>הובא ע"י</label><input id="broughtBy" placeholder="לא חובה — אם מישהו אחר הביא בשם הלקוח"></div>
     <div class="suggest hidden" id="customerSuggest"></div>
 
     <div id="bags"></div>
     <button type="button" class="btn-add" id="addBag">+ הוסף שקית</button>
 
-    <div class="grid2">
+    <div class="grid2 customer-only">
       <div class="field"><label>💰 תשלום שהתקבל עכשיו (₪)</label><input id="newPayAmount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="לא חובה"></div>
       <div class="field"><label>הערה לתשלום</label><input id="newPayNote" placeholder="לא חובה"></div>
     </div>
@@ -674,8 +683,8 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
     msg.textContent = 'שקית ' + (tooManyCases + 1) + ': מספר בתי המזוזה לא יכול להיות גדול ממספר המזוזות (' + bags[tooManyCases].quantity + ').';
     return;
   }
-  // כתובת לא חובה — מזהירים ומאפשרים להמשיך
-  if (!document.getElementById('address').value.trim() &&
+  // כתובת לא חובה — מזהירים ומאפשרים להמשיך (באספקה מסופר אין כתובת)
+  if (orderKind === 'customer' && !document.getElementById('address').value.trim() &&
       !confirm('חסרה כתובת ללקוח. להמשיך וליצור את ההזמנה בלי כתובת?')) {
     document.getElementById('address').focus();
     return;
@@ -688,8 +697,9 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
       phone: document.getElementById('phone').value.trim(),
       address: document.getElementById('address').value.trim(),
     },
-    brought_by: document.getElementById('broughtBy').value.trim(),
-    payment: document.getElementById('newPayAmount').value
+    kind: orderKind,
+    brought_by: orderKind === 'customer' ? document.getElementById('broughtBy').value.trim() : '',
+    payment: orderKind === 'customer' && document.getElementById('newPayAmount').value
       ? { amount: +document.getElementById('newPayAmount').value, note: document.getElementById('newPayNote').value.trim() }
       : null,
     bags,
@@ -707,6 +717,7 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
     msg.innerHTML = 'הזמנה מספר ' + data.order_number + ' נוצרה, ' + data.bags.length + ' מדבקות נשלחו להדפסה.<div class="codes">' +
       data.bags.map(b => b.bag_code).join(' · ') + '</div>';
     e.target.reset();
+    setOrderKind('customer');
     suggestEl.classList.add('hidden'); lastSearchDigits = '';
     bagsEl.innerHTML = ''; bagCount = 0; addBag();
     if (!document.getElementById('listPanel').classList.contains('hidden')) loadList();
@@ -715,6 +726,24 @@ document.getElementById('orderForm').addEventListener('submit', async (e) => {
     msg.textContent = err.message;
   }
 });
+
+// --- סוג הזמנה: לקוח / אספקה מסופר (סופר הביא כמות לבדיקה; מיכאל מחזיר חלקים, אין לקוח לעדכן) ---
+let orderKind = 'customer';
+function setOrderKind(kind){
+  orderKind = kind;
+  document.querySelectorAll('.kind-btn').forEach(b => b.classList.toggle('active', b.dataset.kind === kind));
+  document.querySelectorAll('#orderForm .customer-only').forEach(el => el.classList.toggle('hidden', kind === 'supply'));
+  document.getElementById('supplyHint').classList.toggle('hidden', kind !== 'supply');
+  document.getElementById('firstName').placeholder = document.getElementById('lastName').placeholder =
+    kind === 'supply' ? 'שם הסופר — פרטי או משפחה' : 'פרטי או משפחה — אחד מהם חובה';
+}
+document.querySelectorAll('.kind-btn').forEach(b => b.addEventListener('click', () => setOrderKind(b.dataset.kind)));
+function supplyTag(b){ return b.kind === 'supply' ? '<span class="supply-tag">אספקה מסופר</span> ' : ''; }
+// אספקה: כמה כבר חזרו מתוך הכמות (כשחזר חלק)
+function partialInfo(b){
+  return b.kind === 'supply' && b.returned_quantity > 0 && b.status !== 'returned'
+    ? ' · <b>חזרו ' + b.returned_quantity + ' מתוך ' + b.quantity + '</b>' : '';
+}
 
 // --- תצוגת כל ההזמנות ---
 let keepSearchOnce = false;
@@ -747,6 +776,8 @@ function statusBadge(b){
   // התוכנה של מיכאל שלחה דוח ושחררה — מוכן אצלו, עוד לא נמסר לחנות
   if (b.status === 'with_supplier' && b.ready_at) return '<span class="badge ready">מוכן אצל מיכאל</span>';
   if (b.status === 'with_supplier' && b.imported_at) return '<span class="badge progress">בתוכנה של מיכאל</span>';
+  if (b.kind === 'supply' && b.status === 'returned') return '<span class="badge collected">הכל חזר — נקלט בחנות</span>';
+  if (b.kind === 'supply' && b.status === 'with_supplier' && b.returned_quantity > 0) return '<span class="badge ready">חזרו ' + b.returned_quantity + '/' + b.quantity + '</span>';
   if (b.status === 'returned' && b.customer_collected_at) return '<span class="badge collected">נאסף ע"י לקוח</span>';
   if (b.status === 'returned' && b.customer_notified_at) return '<span class="badge notified">עודכן ללקוח</span>';
   return STATUS_BADGE[b.status] || b.status;
@@ -817,8 +848,8 @@ async function loadList(){
       const paidInfo = b.paid_total > 0 ? ' · 💰 שולם ₪' + Number(b.paid_total).toLocaleString('he-IL') : '';
       const supplierNoteInfo = b.supplier_note ? ' · <b style="color:var(--accent);">💬 מיכאל: ' + esc(b.supplier_note) + '</b>' : '';
       return '<div class="bag-row" data-order="' + b.order_number + '" data-code="' + b.bag_code + '" style="cursor:pointer;">' +
-        '<div><div class="who">' + b.bag_code + ' · ' + esc(b.first_name) + ' ' + esc(b.last_name) + '</div>' +
-        '<div class="sub">הזמנה #' + b.order_number + ' · ' + item + ' · נוצר ' + when + collectionInfo + noteInfo + broughtInfo + directInfo + reportInfo + paidInfo + supplierNoteInfo + '</div></div>' +
+        '<div><div class="who">' + b.bag_code + ' · ' + supplyTag(b) + esc(fullName(b)) + '</div>' +
+        '<div class="sub">הזמנה #' + b.order_number + ' · ' + item + partialInfo(b) + ' · נוצר ' + when + collectionInfo + noteInfo + broughtInfo + directInfo + reportInfo + paidInfo + supplierNoteInfo + '</div></div>' +
         '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">' + statusBadge(b) +
         // שקית שחזרה לחנות ועוד לא נמסרה ללקוח — מסירה ישירות מהרשימה, בלי להיכנס לפעולות מהירות
         (!quickAction && b.status === 'returned' && !b.customer_collected_at
@@ -877,6 +908,8 @@ async function openEdit(orderNumber){
 
 function renderEdit(data){
   editLocked = data.locked;
+  (data.bags || []).forEach(b => { b.kind = data.kind; });
+  document.getElementById('editTitle').innerHTML = 'הזמנה #' + esc(data.order_number) + (data.kind === 'supply' ? ' · <span class="supply-tag">אספקה מסופר</span>' : '');
   document.getElementById('editFirstName').value = data.first_name;
   document.getElementById('editLastName').value = data.last_name;
   document.getElementById('editPhone').value = data.phone;
@@ -1637,7 +1670,7 @@ document.getElementById('smsTemplateSave').addEventListener('click', async () =>
 const LOG_ACTION_LABELS = {
   order_created: 'הזמנה נוצרה', order_edited: '✏️ פרטי ההזמנה שונו בחנות', order_deleted: 'הזמנה נמחקה',
   bag_added: 'שקית נוספה', bag_deleted: 'שקית נמחקה', label_reprinted: 'מדבקה הודפסה שוב',
-  picked_up: 'נאסף ע"י מיכאל', released: 'מוכן אצל מיכאל (שוחרר מהתוכנה)', returned: 'הוחזר ממיכאל',
+  picked_up: 'נאסף ע"י מיכאל', released: 'מוכן אצל מיכאל (שוחרר מהתוכנה)', returned: 'הוחזר ממיכאל', returned_partial: 'הוחזר חלקית ממיכאל',
   customer_notified: 'עודכן ללקוח', customer_collected: 'נאסף ע"י לקוח',
   customer_linked: 'מיכאל דיווח מספר לקוח', manual_fix: 'תיקון ידני', settings_changed: 'הגדרה עודכנה',
   report_received: '📋 התקבל דוח ממיכאל', print_failed: '⚠️ הדפסת מדבקה נכשלה', sms_failed: '⚠️ SMS ללקוח לא נשלח',
