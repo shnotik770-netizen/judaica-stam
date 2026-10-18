@@ -116,7 +116,7 @@ router.get("/events/log", asyncHandler(async (req, res) => {
 // --- התוכנה של מיכאל ---
 router.get("/supplier/access", asyncHandler(async (req, res) => {
   const [open, keys] = await Promise.all([
-    getSetting("supplier_api_open", "1"),
+    getSetting("supplier_api_open", "0"),
     pool.query("select id, label, active, created_at, last_used_at from api_keys where scope = 'supplier' order by created_at desc"),
   ]);
   res.json({ open: open === "1", keys: keys.rows });
