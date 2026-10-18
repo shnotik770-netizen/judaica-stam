@@ -348,3 +348,5 @@ create table if not exists auth_events (
   detail text,
   created_at timestamptz not null default now()
 );
+-- אספקה מסופר: כמה מהכמות כבר נבדקו ומוכנות אצל מיכאל (מצטבר, מגיע בדוח כ-ready_quantity). ready_at רק כשכולן מוכנות.
+alter table bags add column if not exists ready_quantity int not null default 0;

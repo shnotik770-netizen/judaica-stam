@@ -424,8 +424,8 @@ function renderRows(bags, extraLine, clickable, withHistory, extraButton){
         ? ' (' + [variantText(b.variant), b.mezuzah_cases != null ? b.mezuzah_cases + ' בתי מזוזה' : ''].filter(Boolean).join(' · ') + ')' : '');
     const noteInfo = (b.item_type_note ? ' · 📝 ' + esc(b.item_type_note) : '') +
       // אספקה: כמה כבר הוחזרו וכמה עוד אצלי
-      (b.kind === 'supply' && b.returned_quantity > 0
-        ? ' · <b>הוחזרו ' + b.returned_quantity + ' מתוך ' + b.quantity + (b.remaining_quantity ? ', נותרו אצלי ' + b.remaining_quantity : '') + '</b>' : '');
+      (b.kind === 'supply' && (b.returned_quantity > 0 || b.ready_quantity > 0)
+        ? ' · <b>מוכנות ' + (b.ready_quantity || 0) + ' · הוחזרו ' + b.returned_quantity + ' מתוך ' + b.quantity + (b.remaining_quantity ? ', נותרו אצלי ' + b.remaining_quantity : '') + '</b>' : '');
     const broughtInfo = b.brought_by ? ' · הובא ע"י ' + esc(b.brought_by) : '';
     const myNoteInfo = b.supplier_note ? ' · <b style="color:var(--accent);">📝 ההערה שלי: ' + esc(b.supplier_note) + '</b>' : '';
     const histBtn = withHistory && !clickable
@@ -605,7 +605,10 @@ async function applyQuickAction(bag_codes, force){
         const b = r.bag;
         const ans = prompt('אספקה מסופר — ' + [b.customer.first_name, b.customer.last_name].filter(Boolean).join(' ') + ' · שקית ' + b.bag_code +
           '\n' + itemText(b.item_type, b.quantity) + (b.returned_quantity ? ' · כבר הוחזרו ' + b.returned_quantity : '') +
-          '\nכמה חוזרות לחנות עכשיו? (נותרו אצלך ' + b.remaining_quantity + ')', String(b.remaining_quantity));
+          (b.ready_quantity ? ' · דווחו כמוכנות ' + b.ready_quantity : '') +
+          '\nכמה חוזרות לחנות עכשיו? (נותרו אצלך ' + b.remaining_quantity + ')',
+          // ברירת מחדל: המוכנות שעוד לא הוחזרו (אם דווחו), אחרת כל מה שנותר
+          String(b.ready_quantity > b.returned_quantity ? Math.min(b.ready_quantity - b.returned_quantity, b.remaining_quantity) : b.remaining_quantity));
         if (ans === null) { addQuickLog('warn', b.bag_code, 'בוטל — לא נמסר'); continue; }
         const n = parseInt(ans, 10);
         if (!(n >= 1 && n <= b.remaining_quantity)) { addQuickLog('warn', b.bag_code, 'כמות לא תקינה (1–' + b.remaining_quantity + ')'); scanHadError = true; continue; }
@@ -723,7 +726,7 @@ document.getElementById('quickCameraSwitch').addEventListener('click', switchQui
 // מחיקה מחזירה את השקית למצב שלפני אותה פעולה (DELETE /api/orders/activity-log/:id, ראו README).
 const SUPPLIER_LOG_LABELS = {
   order_created: 'הזמנה נוצרה', bag_added: 'שקית נוספה', label_reprinted: 'מדבקה הודפסה שוב',
-  report_received: '📋 נשלח דוח', delivered_direct: '🤝 נמסר ללקוח ישירות', released: 'מוכן — שוחרר מהתוכנה', picked_up: 'נאסף ע"י מיכאל', returned: 'הוחזר ממיכאל', returned_partial: 'הוחזר חלקית ממיכאל', customer_notified: 'עודכן ללקוח',
+  report_received: '📋 נשלח דוח', delivered_direct: '🤝 נמסר ללקוח ישירות', released: 'מוכן — שוחרר מהתוכנה', picked_up: 'נאסף ע"י מיכאל', returned: 'הוחזר ממיכאל', returned_partial: 'הוחזר חלקית ממיכאל', ready_partial: 'מוכן חלקית', customer_notified: 'עודכן ללקוח',
   customer_collected: 'נאסף ע"י לקוח', manual_fix: 'תיקון ידני (חנות)', print_failed: 'הדפסת מדבקה נכשלה',
   supplier_note: '📝 הערה', supplier_update: '✏️ תיקון פרטים', customer_linked: 'דווח מספר לקוח', order_edited: 'ההזמנה נערכה בחנות', bag_edited: 'השקית נערכה בחנות',
 };

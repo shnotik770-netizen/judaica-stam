@@ -45,6 +45,8 @@ function serializeBag(bag) {
     // "customer" = הזמנת לקוח; "supply" = אספקה מסופר (customer = פרטי הסופר) — אפשר להחזיר חלק מהכמות בכל פעם
     kind: bag.kind || "customer",
     returned_quantity: bag.returned_quantity || 0, // כמה כבר הוחזרו לחנות (באספקה: מצטבר בהחזרות חלקיות)
+    // באספקה: כמה נבדקו ומוכנות עד עכשיו (מצטבר, מהדוחות). בהזמנת לקוח — כל הכמות כשיש ready_at
+    ready_quantity: bag.kind === "supply" ? (bag.ready_quantity || 0) : (bag.ready_at ? bag.quantity : 0),
     remaining_quantity: bag.status === "with_supplier" ? bag.quantity - (bag.returned_quantity || 0) : 0,
     status: bag.status,
     stage: bagStage(bag),
@@ -172,7 +174,7 @@ async function returnBag(bag, result, qty = remainingOf(bag)) {
     return;
   }
   await pool.query(
-    `update bags set status='returned', returned_at=now(), result=$2, returned_quantity=quantity,
+    `update bags set status='returned', returned_at=now(), result=$2, returned_quantity=quantity, ready_quantity=quantity,
        customer_collected_at = case when $3 then now() else customer_collected_at end, updated_at=now() where id=$1`,
     [bag.id, result ? JSON.stringify(result) : null, bag.kind === "supply"]
   );
@@ -263,11 +265,6 @@ router.post("/bulk-scan", asyncHandler(async (req, res) => {
           results.push({ bag_code: code, ok: false, error: "השקית לא אצל הספק" });
           continue;
         }
-        // מסירה לחנות של שקית שהתוכנה של הספק עוד לא שחררה (אין דוח) — מותר, אבל רק אחרי אישור מפורש (force)
-        if (!bag.ready_at && !force) {
-          results.push({ bag_code: code, ok: false, needs_confirm: true, error: "שקית זו לא דווחה כנבדקה" });
-          continue;
-        }
         if (bag.kind === "supply" && ask_quantity && (quantity == null || quantity === "")) {
           results.push({ bag_code: code, ok: false, needs_quantity: true, error: "כמה חוזרות?", bag: serializeBag(bag) });
           continue;
@@ -275,6 +272,14 @@ router.post("/bulk-scan", asyncHandler(async (req, res) => {
         const rq = returnQuantity(bag, quantity);
         if (rq.error) {
           results.push({ bag_code: code, ok: false, error: rq.error });
+          continue;
+        }
+        // מסירה לחנות של שקית שהתוכנה של הספק עוד לא שחררה (אין דוח) — מותר, אבל רק אחרי אישור מפורש (force).
+        // באספקה: מותר בלי אישור כל עוד מה שחוזר לא עובר את מה שדווח כמוכן (ready_quantity)
+        const readyEnough = bag.ready_at || (bag.kind === "supply" && (bag.returned_quantity || 0) + rq.qty <= (bag.ready_quantity || 0));
+        if (!readyEnough && !force) {
+          results.push({ bag_code: code, ok: false, needs_confirm: true, error: bag.kind === "supply" && bag.ready_quantity
+            ? `דווחו כמוכנות רק ${bag.ready_quantity} (כבר הוחזרו ${bag.returned_quantity || 0})` : "שקית זו לא דווחה כנבדקה" });
           continue;
         }
         await returnBag(bag, bag.result || null, rq.qty);
@@ -307,7 +312,7 @@ router.post("/report", asyncHandler(async (req, res) => {
   }
   const results = [];
   for (const item of items) {
-    const { bag_code, summary, report } = item || {};
+    const { bag_code, summary, report, ready_quantity } = item || {};
     if (!bag_code) { results.push({ bag_code: null, ok: false, error: "bag_code נדרש" }); continue; }
     if ((summary == null || String(summary).trim() === "") && report === undefined) {
       results.push({ bag_code, ok: false, error: "צריך summary או report (או שניהם)" });
@@ -319,6 +324,17 @@ router.post("/report", asyncHandler(async (req, res) => {
       results.push({ bag_code, ok: false, error: "השקית עוד לא נאספה — אי אפשר לשלוח עליה דוח" });
       continue;
     }
+    // אספקה מסופר: ready_quantity = כמה מוכנות עד עכשיו (מצטבר). בהזמנת לקוח — מתעלמים
+    let readyQty = null;
+    if (bag.kind === "supply" && ready_quantity !== undefined && ready_quantity !== null && ready_quantity !== "") {
+      readyQty = Number(ready_quantity);
+      if (!Number.isInteger(readyQty) || readyQty < 0 || readyQty > bag.quantity) {
+        results.push({ bag_code, ok: false, error: `ready_quantity חייב להיות בין 0 ל-${bag.quantity}` }); continue;
+      }
+      if (readyQty < (bag.returned_quantity || 0)) {
+        results.push({ bag_code, ok: false, error: `ready_quantity לא יכול להיות פחות ממה שכבר הוחזר (${bag.returned_quantity})` }); continue;
+      }
+    }
     const cleanSummary = summary == null ? null : String(summary).trim().slice(0, 2000) || null;
     const { rows } = await pool.query(
       "insert into bag_reports (bag_id, summary, report) values ($1, $2, $3) returning id, received_at",
@@ -326,10 +342,17 @@ router.post("/report", asyncHandler(async (req, res) => {
     );
     logActivity(bag.bag_code, bag.order_number, "report_received", cleanSummary ? cleanSummary.slice(0, 200) : null);
     let released = false;
-    if (bag.status === "with_supplier" && !bag.ready_at) {
+    // אספקה עם ready_quantity חלקי — רק מעדכנים כמה מוכנות; השקית נשארת "בבדיקה" (בלי ready_at)
+    if (bag.status === "with_supplier" && readyQty !== null && readyQty < bag.quantity) {
+      if (readyQty !== (bag.ready_quantity || 0)) {
+        const prev = (await snapshotBagStates([bag.bag_code])).get(bag.bag_code);
+        await pool.query("update bags set ready_quantity = $2, updated_at = now() where id = $1", [bag.id, readyQty]);
+        logActivity(bag.bag_code, bag.order_number, "ready_partial", `מוכנות ${readyQty} מתוך ${bag.quantity}`, prev);
+      }
+    } else if (bag.status === "with_supplier" && !bag.ready_at) {
       const prev = (await snapshotBagStates([bag.bag_code])).get(bag.bag_code);
       await pool.query(
-        "update bags set ready_at = now(), result = $2, updated_at = now() where id = $1",
+        "update bags set ready_at = now(), ready_quantity = quantity, result = $2, updated_at = now() where id = $1",
         [bag.id, report === undefined ? JSON.stringify({ summary: cleanSummary }) : JSON.stringify(report)]
       );
       logActivity(bag.bag_code, bag.order_number, "released", null, prev);
@@ -338,6 +361,7 @@ router.post("/report", asyncHandler(async (req, res) => {
     results.push({
       bag_code: bag.bag_code, ok: true, report_id: rows[0].id, received_at: rows[0].received_at,
       released, returned: false, // returned נשאר תמיד false — ההחזרה רק ב"מסירה לחנות"
+      ...(bag.kind === "supply" ? { ready_quantity: readyQty ?? (released ? bag.quantity : bag.ready_quantity || 0) } : {}),
     });
   }
   res.json({ results });
