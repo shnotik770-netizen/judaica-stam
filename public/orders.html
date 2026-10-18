@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>הזמנה חדשה — חנות יודאייקה</title>
+<script src="/auth.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&display=swap">
 <style>
@@ -224,6 +225,22 @@
   .price-row button{padding:8px 12px;font-size:13px;white-space:nowrap;}
   .dirty-bar{position:sticky;bottom:8px;z-index:20;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#f6c343;color:#3d2c00;border-radius:11px;padding:10px 12px;font-weight:800;font-size:14px;box-shadow:0 3px 12px rgba(0,0,0,.25);}
   .dirty-bar button{background:#3d2c00;color:#fff;padding:8px 12px;font-size:13px;white-space:nowrap;}
+  .users-list{display:flex;flex-direction:column;gap:8px;}
+  .user-row{background:var(--surface-2);border-radius:11px;padding:10px;display:flex;flex-direction:column;gap:7px;}
+  .user-row.inactive{opacity:.55;}
+  .u-main{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+  .u-main input,.user-add input{padding:8px 10px;font-size:14px;}
+  .u-access{display:flex;flex-wrap:wrap;gap:4px 12px;}
+  .u-flag{display:flex;align-items:center;gap:5px;font-size:13px;margin:0;color:var(--text);cursor:pointer;}
+  .u-flag input{width:17px;height:17px;}
+  .u-meta{font-size:12px;color:var(--text-muted);}
+  .u-btns{display:flex;gap:6px;flex-wrap:wrap;}
+  .u-btns button{padding:6px 11px;font-size:12.5px;}
+  .user-add{display:flex;flex-direction:column;gap:7px;background:var(--surface-2);border-radius:11px;padding:10px;}
+  .events-mini{display:flex;flex-direction:column;gap:3px;font-size:12px;max-height:280px;overflow-y:auto;margin:6px 0;}
+  .events-mini div{background:var(--surface-2);border-radius:6px;padding:4px 8px;}
+  .events-mini div.bad{color:var(--danger);}
+  .strip-user a{cursor:pointer;}
 </style>
 </head>
 <body>
@@ -234,8 +251,8 @@
     <h1>חנות יודאייקה</h1>
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
       <button type="button" class="link-out" id="quickActionShortcut" style="cursor:pointer;font-family:inherit;">⚡ פעולות מהירות</button>
-      <a class="link-out" href="/items.html" target="_blank">🧾 הזמנות פריטים</a>
-      <a class="link-out" href="/supplier.html" target="_blank">↗ דף האיסוף (מיכאל)</a>
+      <a class="link-out" data-need="items" href="/items.html" target="_blank">🧾 הזמנות פריטים</a>
+      <a class="link-out" data-need="supplier" href="/supplier.html" target="_blank">↗ דף האיסוף (מיכאל)</a>
     </div>
   </div>
 
@@ -439,6 +456,25 @@
       <button type="button" class="admin-nav-btn" data-section="log">📋 יומן פעולות</button>
       <button type="button" class="admin-nav-btn" data-section="inbox">💬 הודעות SMS <span class="unread-badge hidden" id="smsUnreadBadge2"></span></button>
       <button type="button" class="admin-nav-btn" data-section="catalog">🏷️ סוגי מוצרים ומצבים</button>
+      <button type="button" class="admin-nav-btn" data-section="users" data-admin-only>🔐 משתמשים והרשאות</button>
+    </div>
+    <div class="card admin-section hidden" data-section="users">
+      <b>🔐 משתמשים והרשאות</b>
+      <div class="sub" style="margin:0;">הכניסה לכל הדפים בקוד SMS בלבד, וחיבור תקף חצי שנה. לכל משתמש מסמנים לאילו אתרים יש לו גישה. מנהל — גישה לכל האתרים ולמסך הזה.</div>
+      <div id="usersList" class="users-list"></div>
+      <b style="font-size:14px;">+ משתמש חדש</b>
+      <div class="user-add">
+        <input id="uNewName" placeholder="שם">
+        <input id="uNewPhone" type="tel" inputmode="numeric" placeholder="טלפון">
+        <div class="u-access" id="uNewAccess"></div>
+        <button type="button" class="btn-primary" id="uNewAdd">הוסף</button>
+      </div>
+      <div class="msg" id="usersMsg"></div>
+      <hr style="border:none;border-top:1px solid var(--border);width:100%;">
+      <b>🔑 גישת התוכנה של מיכאל (יודאיקה פלוס)</b>
+      <div class="sub" style="margin:0;">התוכנה של מיכאל פונה לשרת בלי כניסה ב-SMS — בשבילה יש מפתח גישה. כל עוד "גישה בלי מפתח" פתוחה, התוכנה ממשיכה לעבוד כמו היום; אחרי שמיכאל הגדיר את המפתח אצלו — סוגרים.</div>
+      <div id="supplierAccess"></div>
+      <details><summary style="cursor:pointer;font-weight:600;color:var(--accent);">📋 יומן כניסות</summary><div id="authEvents" class="events-mini"></div></details>
     </div>
     <div class="card admin-section hidden" data-section="catalog">
       <b>🏷️ הזמנות פריטים — סוגי מוצרים ומצבים</b>
@@ -1860,6 +1896,93 @@ document.getElementById('customerSearch').addEventListener('input', () => {
   clearTimeout(window._customerSearchDebounce);
   window._customerSearchDebounce = setTimeout(loadCustomers, 400);
 });
+// --- ניהול: משתמשים והרשאות (רק מנהל) ---
+const SITE_LABELS = { store: 'חנות (סת"ם)', items: 'הזמנות פריטים', supplier: 'איסוף מיכאל' };
+async function usersApi(path, method, body){
+  const res = await fetch(API_BASE + '/api/users' + path, body !== undefined ? { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { method: method || 'GET' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'שגיאה');
+  return data;
+}
+function usersErr(err){ const m = document.getElementById('usersMsg'); m.className = 'msg err'; m.textContent = err.message; }
+function accessBoxes(selected, isAdmin){
+  return Object.entries(SITE_LABELS).map(([k, l]) => '<label class="u-flag"><input type="checkbox" data-site="' + k + '"' + (isAdmin || selected.includes(k) ? ' checked' : '') + (isAdmin ? ' disabled' : '') + '>' + l + '</label>').join('');
+}
+async function loadUsersAdmin(){
+  document.getElementById('usersMsg').className = 'msg';
+  try {
+    const { users } = await usersApi('');
+    const box = document.getElementById('usersList');
+    box.innerHTML = users.map(u =>
+      '<div class="user-row' + (u.active ? '' : ' inactive') + '" data-id="' + u.id + '">' +
+        '<div class="u-main"><input class="u-name" value="' + esc(u.name) + '"><input class="u-phone" type="tel" inputmode="numeric" value="' + esc(u.phone) + '"></div>' +
+        '<div class="u-access">' + accessBoxes(u.access, u.is_admin) + '</div>' +
+        '<div class="u-access"><label class="u-flag"><input type="checkbox" class="u-admin"' + (u.is_admin ? ' checked' : '') + '>מנהל</label>' +
+        '<label class="u-flag"><input type="checkbox" class="u-active"' + (u.active ? ' checked' : '') + '>פעיל</label></div>' +
+        '<div class="u-meta">' + (u.last_login_at ? 'כניסה אחרונה: ' + new Date(u.last_login_at).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }) : 'עוד לא נכנס') +
+          ' · ' + u.sessions + ' מכשירים מחוברים</div>' +
+        '<div class="u-btns"><button type="button" class="btn-primary u-save">שמור</button><button type="button" class="btn-ghost u-logout">נתק מכשירים</button><button type="button" class="btn-danger u-del">מחק</button></div>' +
+      '</div>').join('');
+    box.querySelectorAll('.user-row').forEach(row => {
+      const id = row.dataset.id;
+      // מנהל = גישה לכל האתרים (התיבות מסומנות ונעולות)
+      row.querySelector('.u-admin').addEventListener('change', e => row.querySelectorAll('[data-site]').forEach(cb => { cb.disabled = e.target.checked; if (e.target.checked) cb.checked = true; }));
+      row.querySelector('.u-save').onclick = () => usersApi('/' + id, 'PUT', {
+        name: row.querySelector('.u-name').value, phone: row.querySelector('.u-phone').value,
+        access: [...row.querySelectorAll('[data-site]:checked')].map(cb => cb.dataset.site),
+        is_admin: row.querySelector('.u-admin').checked, active: row.querySelector('.u-active').checked,
+      }).then(() => { const m = document.getElementById('usersMsg'); m.className = 'msg ok'; m.textContent = '✓ נשמר'; loadUsersAdmin(); }, usersErr);
+      row.querySelector('.u-logout').onclick = () => { if (confirm('לנתק את כל המכשירים של ' + row.querySelector('.u-name').value + '? (יצטרך להיכנס שוב בקוד)')) usersApi('/' + id + '/logout-all', 'POST', {}).then(loadUsersAdmin, usersErr); };
+      row.querySelector('.u-del').onclick = () => { if (confirm('למחוק את ' + row.querySelector('.u-name').value + '?')) usersApi('/' + id, 'DELETE').then(loadUsersAdmin, usersErr); };
+    });
+    document.getElementById('uNewAccess').innerHTML = accessBoxes(['store', 'items'], false) + '<label class="u-flag"><input type="checkbox" id="uNewAdmin">מנהל</label>';
+    loadSupplierAccess();
+    const ev = await usersApi('/events/log');
+    const LBL = { code_requested: 'בקשת קוד', login: 'כניסה', user_added: 'משתמש נוסף', user_changed: 'משתמש עודכן', user_deleted: 'משתמש נמחק', supplier_api_open: 'גישת התוכנה של מיכאל', supplier_key_created: 'מפתח חדש למיכאל' };
+    document.getElementById('authEvents').innerHTML = ev.events.map(e => '<div class="' + (e.ok ? '' : 'bad') + '">' + (e.ok ? '✓' : '✗') + ' <b>' + esc(LBL[e.action] || e.action) + '</b> · ' + esc(e.name || e.phone || '') +
+      (e.detail ? ' · ' + esc(e.detail) : '') + ' <span style="color:var(--text-muted);">' + new Date(e.created_at).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }) + (e.ip ? ' · ' + esc(e.ip) : '') + '</span></div>').join('') || '<div>אין</div>';
+  } catch (err) { usersErr(err); }
+}
+document.getElementById('uNewAdd').addEventListener('click', () => {
+  const isAdmin = document.getElementById('uNewAdmin').checked;
+  usersApi('', 'POST', {
+    name: document.getElementById('uNewName').value, phone: document.getElementById('uNewPhone').value, is_admin: isAdmin,
+    access: [...document.querySelectorAll('#uNewAccess [data-site]:checked')].map(cb => cb.dataset.site),
+  }).then(() => { document.getElementById('uNewName').value = ''; document.getElementById('uNewPhone').value = ''; loadUsersAdmin(); }, usersErr);
+});
+async function loadSupplierAccess(){
+  const box = document.getElementById('supplierAccess');
+  try {
+    const a = await usersApi('/supplier/access');
+    const activeKeys = a.keys.filter(k => k.active);
+    box.innerHTML =
+      '<label class="u-flag" style="font-weight:700;"><input type="checkbox" id="supOpen"' + (a.open ? ' checked' : '') + '>גישה בלי מפתח (זמני)</label>' +
+      (a.open ? '<div class="supplier-note" style="border-color:var(--danger);">⚠️ פתוח: כל מי שמכיר את הכתובת יכול לקרוא את רשימת השקיות של מיכאל (שמות וטלפונים). לסגור אחרי שמיכאל הגדיר מפתח.</div>'
+              : '<div class="supplier-note">🔒 סגור: התוכנה של מיכאל עובדת רק עם מפתח תקף.</div>') +
+      '<div class="events-mini">' + (a.keys.map(k => '<div' + (k.active ? '' : ' class="bad"') + '>🔑 ' + esc(k.label) + ' · נוצר ' + new Date(k.created_at).toLocaleDateString('he-IL') +
+        ' · ' + (k.last_used_at ? 'שימוש אחרון ' + new Date(k.last_used_at).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }) : 'לא היה שימוש') +
+        (k.active ? ' <button type="button" class="btn-danger key-off" data-id="' + k.id + '" style="padding:1px 7px;">בטל</button>' : ' (מבוטל)') + '</div>').join('') || '<div>אין מפתחות</div>') + '</div>' +
+      '<button type="button" class="btn-ghost" id="newKeyBtn">🔑 צור מפתח חדש למיכאל</button><div id="newKeyBox"></div>';
+    box.querySelector('#supOpen').onchange = e => {
+      if (!e.target.checked && !activeKeys.length && !confirm('אין אף מפתח פעיל — התוכנה של מיכאל תפסיק לעבוד. לסגור בכל זאת?')) { e.target.checked = true; return; }
+      usersApi('/supplier/access', 'PUT', { open: e.target.checked }).then(loadSupplierAccess, usersErr);
+    };
+    box.querySelectorAll('.key-off').forEach(b => b.onclick = () => { if (confirm('לבטל את המפתח? התוכנה שמשתמשת בו תפסיק לעבוד.')) usersApi('/supplier/keys/' + b.dataset.id, 'DELETE').then(loadSupplierAccess, usersErr); });
+    box.querySelector('#newKeyBtn').onclick = async () => {
+      try {
+        const r = await usersApi('/supplier/keys', 'POST', { label: 'יודאיקה פלוס' });
+        // המפתח מוצג פעם אחת בלבד — נשמר אצלנו רק hash
+        const nb = document.getElementById('newKeyBox');
+        nb.innerHTML = '<div class="supplier-note">המפתח החדש (מוצג <b>פעם אחת בלבד</b> — להעביר למיכאל בצורה מאובטחת):<div class="codes" style="user-select:all;direction:ltr;text-align:left;"></div><button type="button" class="btn-ghost" id="copyKey">העתק</button></div>';
+        nb.querySelector('.codes').textContent = r.key;
+        nb.querySelector('#copyKey').onclick = () => navigator.clipboard.writeText(r.key).then(() => alert('הועתק'));
+        const a2 = await usersApi('/supplier/access'); // רענון הרשימה בלי להעלים את המפתח
+        box.querySelector('.events-mini').innerHTML = a2.keys.map(k => '<div' + (k.active ? '' : ' class="bad"') + '>🔑 ' + esc(k.label) + ' · נוצר ' + new Date(k.created_at).toLocaleDateString('he-IL') + (k.active ? '' : ' (מבוטל)') + '</div>').join('');
+      } catch (err) { usersErr(err); }
+    };
+  } catch (err) { box.innerHTML = '<div class="msg err">' + esc(err.message) + '</div>'; }
+}
+
 // --- ניהול: סוגי מוצרים ומצבים של "הזמנות פריטים" (/api/items) ---
 async function itemsApi(path, method, body){
   const res = await fetch(API_BASE + '/api/items' + path, body ? { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { method: method || 'GET' });
@@ -1919,7 +2042,7 @@ async function loadCatalog(changed){
 // --- ניהול: כפתורים בראש הדף, כל אחד מציג את החלק שלו (ברירת מחדל: הודעות SMS) ---
 let currentAdminSection = 'inbox'; // ברירת מחדל: הודעות SMS
 let adminJump = null;
-const ADMIN_SECTION_LOADERS = { catalog: () => loadCatalog(false), fix: () => {}, sms: () => loadSettings(), customers: () => loadCustomers(), log: () => loadActivityLog(), inbox: () => { closeSmsThread(); loadSmsInbox(); } };
+const ADMIN_SECTION_LOADERS = { users: () => loadUsersAdmin(), catalog: () => loadCatalog(false), fix: () => {}, sms: () => loadSettings(), customers: () => loadCustomers(), log: () => loadActivityLog(), inbox: () => { closeSmsThread(); loadSmsInbox(); } };
 function showAdminSection(section){
   currentAdminSection = section;
   document.querySelectorAll('.admin-nav-btn').forEach(b => b.classList.toggle('active', b.dataset.section === section));

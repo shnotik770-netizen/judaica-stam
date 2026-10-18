@@ -10,13 +10,26 @@ import { router as supplierRouter } from "./routes/supplier.js";
 import { router as ordersRouter } from "./routes/orders.js";
 import { router as labelsRouter } from "./routes/labels.js";
 import { router as itemsRouter } from "./routes/items.js";
+import { router as authRouter } from "./routes/auth.js";
+import { router as usersRouter } from "./routes/users.js";
+import { securityHeaders, sameOriginGuard, pageGuard, apiGuard, bootstrapUsers } from "./lib/auth.js";
+import { normalizePhone as normalizeIlPhone } from "./lib/phone.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.use(express.json());
+// אבטחה: Railway מאחורי proxy (בשביל req.secure / req.ip), כותרות אבטחה, הגנת CSRF, כניסה בקוד SMS לכל הדפים וה-API
+app.set("trust proxy", 1);
+app.disable("x-powered-by");
+app.use(securityHeaders);
+app.use(express.json({ limit: "200kb" }));
+app.use(sameOriginGuard);
+app.use(pageGuard);
+app.use(apiGuard);
+app.use("/api/auth", authRouter);
+app.use("/api/users", usersRouter);
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/", (req, res) => {
@@ -166,6 +179,7 @@ app.use((err, req, res, next) => {
 async function start() {
   if (process.env.DATABASE_URL) {
     await migrate();
+    await bootstrapUsers(normalizeIlPhone);
   } else {
     console.warn("DATABASE_URL לא מוגדר — מדלג על מיגרציה");
   }

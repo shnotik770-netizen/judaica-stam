@@ -298,3 +298,53 @@ create index if not exists idx_item_order_payments_order on item_order_payments(
 alter table item_order_lines add column if not exists custom_type text;
 -- תאריך לבדיקה — מתי לבדוק מה מצב ההזמנה (תזכורת; מסומן ברשימה כשהגיע)
 alter table item_orders add column if not exists check_date date;
+
+-- ===== אבטחה: כניסה בקוד SMS =====
+-- משתמשים והרשאות: access = אילו אתרים — 'store' (חנות/סת"ם), 'items' (הזמנות פריטים), 'supplier' (דף האיסוף של מיכאל)
+create table if not exists users (
+  id serial primary key,
+  name text not null,
+  phone text not null unique,
+  access text[] not null default '{}',
+  is_admin boolean not null default false,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  last_login_at timestamptz
+);
+-- קודי כניסה: נשמר רק hash (עם salt), תוקף 10 דקות, עד 5 ניסיונות
+create table if not exists auth_codes (
+  id bigserial primary key,
+  phone text not null,
+  salt text not null,
+  code_hash text not null,
+  attempts int not null default 0,
+  used_at timestamptz,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  ip text
+);
+create index if not exists idx_auth_codes_phone on auth_codes(phone, created_at desc);
+-- חיבורים (מכשירים מחוברים): נשמר רק hash של הטוקן שבעוגייה, תוקף חצי שנה
+create table if not exists sessions (
+  id bigserial primary key,
+  token_hash text not null unique,
+  user_id int not null references users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  last_seen_at timestamptz not null default now(),
+  revoked_at timestamptz,
+  ip text,
+  user_agent text
+);
+create index if not exists idx_sessions_user on sessions(user_id);
+-- יומן כניסות (הצלחות / כישלונות / בקשות קוד)
+create table if not exists auth_events (
+  id bigserial primary key,
+  phone text,
+  user_id int,
+  action text not null,
+  ok boolean not null,
+  ip text,
+  detail text,
+  created_at timestamptz not null default now()
+);
