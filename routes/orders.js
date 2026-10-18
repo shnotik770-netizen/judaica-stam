@@ -336,9 +336,22 @@ router.get("/bags", asyncHandler(async (req, res) => {
 
 const SCAN_DUPLICATE_WINDOW_MS = 60 * 1000;
 
+// שקית שמיכאל סימן "מוכן" (ready_at) ועוד לא נמסרה דרך הדף שלו — נקלטת בחנות בסריקה רגילה (כמו שסוכם איתו):
+// מסומנת "הוחזרה" ואז ממשיכים בפעולה. מסירה מהדף של מיכאל נשארת למקרה שהחנות סגורה.
+const readyAtSupplier = (bag) => bag.status === "with_supplier" && bag.ready_at && bag.kind !== "supply";
+async function receiveReadyBag(bag) {
+  const prev = (await snapshotBagStates([bag.bag_code])).get(bag.bag_code);
+  await pool.query(
+    "update bags set status = 'returned', returned_at = now(), returned_quantity = quantity, ready_quantity = quantity, updated_at = now() where id = $1",
+    [bag.id]
+  );
+  logActivity(bag.bag_code, bag.order_number, "returned", "נקלט בסריקה בחנות (היה מוכן אצל מיכאל)", prev);
+  bag.status = "returned";
+}
+
 async function loadBagForScan(code) {
   const { rows } = await pool.query(
-    `select b.id, b.bag_code, b.item_type, b.quantity, b.status, b.customer_notified_at, b.customer_collected_at,
+    `select b.id, b.bag_code, b.item_type, b.quantity, b.status, b.ready_at, b.customer_notified_at, b.customer_collected_at,
             o.order_number, o.kind, c.first_name, c.last_name, c.phone
      from bags b
      join orders o on o.id = b.order_id
@@ -382,8 +395,8 @@ router.get("/sms-preview", asyncHandler(async (req, res) => {
     res.status(409).json({ error: "אספקה מסופר — אין לקוח לעדכן" });
     return;
   }
-  if (bag.status !== "returned") {
-    res.status(409).json({ error: "השקית עדיין לא חזרה מהספק" });
+  if (bag.status !== "returned" && !readyAtSupplier(bag)) {
+    res.status(409).json({ error: bag.status === "with_supplier" ? "השקית עדיין אצל מיכאל ולא דווחה כמוכנה" : "השקית עדיין לא חזרה מהספק" });
     return;
   }
   const group = await findReturnedGroup(bag.phone, { onlyUnnotified: !bag.customer_notified_at });
@@ -423,8 +436,9 @@ router.post("/scan", asyncHandler(async (req, res) => {
       continue;
     }
 
+    if (readyAtSupplier(bag)) await receiveReadyBag(bag);
     if (bag.status !== "returned") {
-      results.push({ bag_code: code, ok: false, error: "השקית עדיין לא חזרה מהספק" });
+      results.push({ bag_code: code, ok: false, error: bag.status === "with_supplier" ? "השקית עדיין אצל מיכאל ולא דווחה כמוכנה" : "השקית עדיין לא חזרה מהספק" });
       continue;
     }
 
