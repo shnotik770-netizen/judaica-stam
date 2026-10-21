@@ -266,7 +266,11 @@ router.post("/bulk-scan", asyncHandler(async (req, res) => {
       }
       if (action === "pickup") {
         if (bag.status !== "waiting_pickup") {
-          results.push({ bag_code: code, ok: false, error: "השקית לא ממתינה לאיסוף — " + bagStateText(bag), status: bag.status });
+          // שקית שכבר אצל מיכאל ומוכנה — כנראה חזרה פיזית לחנות; מכוונים לקליטה הנכונה במקום "איסוף"
+          const hint = bag.status === "with_supplier"
+            ? (bag.ready_at ? ". אם היא חזרה לחנות — לקלוט אותה בסריקה בדף החנות (פעולות מהירות), או כאן ב'מסירה לחנות'" : ". אם היא חזרה לחנות — 'מסירה לחנות' בלשונית 'אצלי'")
+            : "";
+          results.push({ bag_code: code, ok: false, error: "השקית לא ממתינה לאיסוף — " + bagStateText(bag) + hint, status: bag.status });
           continue;
         }
         await pickupBag(bag);
