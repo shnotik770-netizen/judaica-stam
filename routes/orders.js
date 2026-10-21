@@ -339,13 +339,13 @@ const SCAN_DUPLICATE_WINDOW_MS = 60 * 1000;
 // שקית שמיכאל סימן "מוכן" (ready_at) ועוד לא נמסרה דרך הדף שלו — נקלטת בחנות בסריקה רגילה (כמו שסוכם איתו):
 // מסומנת "הוחזרה" ואז ממשיכים בפעולה. מסירה מהדף של מיכאל נשארת למקרה שהחנות סגורה.
 const readyAtSupplier = (bag) => bag.status === "with_supplier" && bag.ready_at && bag.kind !== "supply";
-async function receiveReadyBag(bag) {
+async function receiveReadyBag(bag, detail = "נקלט בסריקה בחנות (היה מוכן אצל מיכאל)") {
   const prev = (await snapshotBagStates([bag.bag_code])).get(bag.bag_code);
   await pool.query(
     "update bags set status = 'returned', returned_at = now(), returned_quantity = quantity, ready_quantity = quantity, updated_at = now() where id = $1",
     [bag.id]
   );
-  logActivity(bag.bag_code, bag.order_number, "returned", "נקלט בסריקה בחנות (היה מוכן אצל מיכאל)", prev);
+  logActivity(bag.bag_code, bag.order_number, "returned", detail, prev);
   bag.status = "returned";
 }
 
@@ -418,8 +418,8 @@ router.post("/scan", asyncHandler(async (req, res) => {
     res.status(400).json({ error: "bag_codes נדרש" });
     return;
   }
-  if (!["notify_manual", "notify_sms", "collect"].includes(action)) {
-    res.status(400).json({ error: "action חייב להיות notify_manual, notify_sms או collect" });
+  if (!["notify_manual", "notify_sms", "collect", "receive"].includes(action)) {
+    res.status(400).json({ error: "action חייב להיות notify_manual, notify_sms, collect או receive" });
     return;
   }
 
@@ -431,6 +431,31 @@ router.post("/scan", asyncHandler(async (req, res) => {
       continue;
     }
     const customer = { first_name: bag.first_name, last_name: bag.last_name, phone: bag.phone };
+
+    // "📥 קבלה מהספק": שקית שחזרה פיזית ממיכאל לחנות — נרשמת "הוחזרה". מוכנה אצלו — מיד; לא דווחה כמוכנה — רק באישור (force)
+    if (action === "receive") {
+      if (bag.status === "returned" || bag.status === "delivered_direct") {
+        results.push({ bag_code: code, ok: true, action: "duplicate", order_number: bag.order_number, item_type: bag.item_type, quantity: bag.quantity, customer,
+          message: bag.status === "returned" ? "כבר התקבלה בחנות" : "נמסרה ללקוח ישירות ע\"י מיכאל" });
+        continue;
+      }
+      if (bag.status === "waiting_pickup") {
+        results.push({ bag_code: code, ok: false, error: "השקית עוד לא נאספה ע\"י מיכאל — היא אמורה להיות בחנות" });
+        continue;
+      }
+      if (bag.kind === "supply") {
+        results.push({ bag_code: code, ok: false, error: "אספקה מסופר — הקליטה לפי כמות, דרך 'מסירה לחנות' בדף של מיכאל" });
+        continue;
+      }
+      if (!bag.ready_at && !force) {
+        results.push({ bag_code: code, ok: true, action: "not_ready", order_number: bag.order_number, item_type: bag.item_type, quantity: bag.quantity, customer });
+        continue;
+      }
+      await receiveReadyBag(bag, bag.ready_at ? "התקבל בחנות (קבלה מהספק)" : "התקבל בחנות (קבלה מהספק) — לא דווח כמוכן אצל מיכאל");
+      results.push({ bag_code: code, ok: true, action: "received", order_number: bag.order_number, item_type: bag.item_type, quantity: bag.quantity, customer });
+      continue;
+    }
+
     if (bag.kind === "supply") {
       results.push({ bag_code: code, ok: false, error: "אספקה מסופר — אין לקוח לעדכן או למסור לו" });
       continue;
