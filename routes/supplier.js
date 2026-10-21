@@ -163,6 +163,16 @@ function returnQuantity(bag, quantity) {
   return { qty: q };
 }
 
+// למה השקית לא במצב המבוקש — מצב נוכחי + מתי, בעברית (להודעות שגיאה בסריקה)
+const fmtDay = (d) => d ? new Date(d).toLocaleDateString("he-IL", { timeZone: "Asia/Jerusalem" }) : "";
+function bagStateText(bag) {
+  if (bag.status === "waiting_pickup") return "ממתינה לאיסוף בחנות";
+  if (bag.status === "with_supplier") return "כבר אצל מיכאל" + (bag.picked_up_at ? ` — נאספה ב-${fmtDay(bag.picked_up_at)}` : "") + (bag.ready_at ? " (מוכנה)" : "");
+  if (bag.status === "returned") return "כבר הוחזרה לחנות" + (bag.returned_at ? ` ב-${fmtDay(bag.returned_at)}` : "");
+  if (bag.status === "delivered_direct") return "נמסרה ללקוח ע\"י מיכאל" + (bag.delivered_direct_at ? ` ב-${fmtDay(bag.delivered_direct_at)}` : "");
+  return bag.status;
+}
+
 // מבצע בפועל החזרה. באספקה מסופר qty יכול להיות חלק מהכמות: השקית נשארת "אצל הספק" עד שחוזר הכל,
 // ואז נסגרת (customer_collected_at — אין לקוח לעדכן; הפריטים נקלטו בחנות).
 async function returnBag(bag, result, qty = remainingOf(bag)) {
@@ -256,13 +266,13 @@ router.post("/bulk-scan", asyncHandler(async (req, res) => {
       }
       if (action === "pickup") {
         if (bag.status !== "waiting_pickup") {
-          results.push({ bag_code: code, ok: false, error: "השקית לא ממתינה לאיסוף" });
+          results.push({ bag_code: code, ok: false, error: "השקית לא ממתינה לאיסוף — " + bagStateText(bag), status: bag.status });
           continue;
         }
         await pickupBag(bag);
       } else {
         if (bag.status !== "with_supplier") {
-          results.push({ bag_code: code, ok: false, error: "השקית לא אצל הספק" });
+          results.push({ bag_code: code, ok: false, error: "השקית לא אצל הספק — " + bagStateText(bag), status: bag.status });
           continue;
         }
         if (bag.kind === "supply" && ask_quantity && (quantity == null || quantity === "")) {
@@ -293,6 +303,8 @@ router.post("/bulk-scan", asyncHandler(async (req, res) => {
       results.push({ bag_code: code, ok: false, error: e.message });
     }
   }
+  // תיעוד כישלונות ביומן השרת (קוד שקית + סיבה, בלי פרטי לקוח) — לאבחון כשמשהו "לא מצליח"
+  for (const r of results) if (!r.ok) console.log(`bulk-scan ${action} failed: ${r.bag_code} — ${r.error}`);
   res.json({ results });
 }));
 
