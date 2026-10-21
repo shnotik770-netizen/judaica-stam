@@ -175,12 +175,12 @@ function bagStateText(bag) {
 
 // מבצע בפועל החזרה. באספקה מסופר qty יכול להיות חלק מהכמות: השקית נשארת "אצל הספק" עד שחוזר הכל,
 // ואז נסגרת (customer_collected_at — אין לקוח לעדכן; הפריטים נקלטו בחנות).
-async function returnBag(bag, result, qty = remainingOf(bag)) {
+async function returnBag(bag, result, qty = remainingOf(bag), detail = null) {
   const prev = (await snapshotBagStates([bag.bag_code])).get(bag.bag_code);
   const total = (bag.returned_quantity || 0) + qty;
   if (bag.kind === "supply" && total < bag.quantity) {
     await pool.query("update bags set returned_quantity=$2, updated_at=now() where id=$1", [bag.id, total]);
-    logActivity(bag.bag_code, bag.order_number, "returned_partial", `חזרו ${qty} · סה"כ ${total} מתוך ${bag.quantity}`, prev);
+    logActivity(bag.bag_code, bag.order_number, "returned_partial", (detail ? detail + " · " : "") + `חזרו ${qty} · סה"כ ${total} מתוך ${bag.quantity}`, prev);
     return;
   }
   await pool.query(
@@ -190,7 +190,7 @@ async function returnBag(bag, result, qty = remainingOf(bag)) {
   );
   // בלי פירוט ביומן — הדוח עצמו נשמר ב-result ומוצג בכפתור "דוח ממיכאל"
   logActivity(bag.bag_code, bag.order_number, "returned",
-    bag.kind === "supply" ? `אספקה: חזרו ${qty} · סה"כ ${bag.quantity} מתוך ${bag.quantity} — הכל חזר` : null, prev);
+    [detail, bag.kind === "supply" ? `אספקה: חזרו ${qty} · סה"כ ${bag.quantity} מתוך ${bag.quantity} — הכל חזר` : null].filter(Boolean).join(" · ") || null, prev);
 }
 
 // עדכון סטטוס — מזהה לבד אם זו מסירה (איסוף) או החזרה, לפי מצב השקית הנוכחי. לסריקה בודדת
@@ -238,6 +238,47 @@ router.post("/scan", asyncHandler(async (req, res) => {
   res.status(409).json({ error: "השקית כבר הוחזרה" });
 }));
 
+// פעולה אחת של איסוף (pickup) / מסירה לחנות (return) על שקית — משותף לדף של מיכאל ולדף החנות
+// ("מסירה למיכאל" / "איסוף ממיכאל"), כדי ששני הדפים יתנהגו בדיוק אותו דבר. from="store" — נוסח ההודעות לחנות.
+export async function supplierScanOne(action, code, quantity, { force, ask_quantity, from, detail } = {}) {
+  try {
+    const bag = await loadBag(code);
+    if (!bag) return { bag_code: code, ok: false, error: "קוד לא מוכר" };
+    if (action === "pickup") {
+      if (bag.status !== "waiting_pickup") {
+        // שקית שכבר אצל מיכאל ומוכנה — כנראה חזרה פיזית לחנות; מכוונים לקליטה הנכונה במקום "איסוף"
+        const hint = bag.status !== "with_supplier" ? ""
+          : from === "store" ? ". אם היא חזרה לחנות — 'איסוף ממיכאל'"
+          : bag.ready_at ? ". אם היא חזרה לחנות — 'איסוף ממיכאל' בדף החנות (פעולות מהירות), או כאן ב'מסירה לחנות'"
+          : ". אם היא חזרה לחנות — 'מסירה לחנות' בלשונית 'אצלי'";
+        return { bag_code: code, ok: false, error: (from === "store" ? "השקית לא ממתינה למסירה למיכאל — " : "השקית לא ממתינה לאיסוף — ") + bagStateText(bag) + hint, status: bag.status, bag: serializeBag(bag) };
+      }
+      await pickupBag(bag);
+      return { bag_code: code, ok: true, bag: serializeBag(await loadBag(code)) };
+    }
+    if (bag.status !== "with_supplier") {
+      return { bag_code: code, ok: false, error: "השקית לא אצל הספק — " + bagStateText(bag), status: bag.status, bag: serializeBag(bag) };
+    }
+    if (bag.kind === "supply" && ask_quantity && (quantity == null || quantity === "")) {
+      return { bag_code: code, ok: false, needs_quantity: true, error: "כמה חוזרות?", bag: serializeBag(bag) };
+    }
+    const rq = returnQuantity(bag, quantity);
+    if (rq.error) return { bag_code: code, ok: false, error: rq.error, bag: serializeBag(bag) };
+    // מסירה לחנות של שקית שהתוכנה של הספק עוד לא שחררה (אין דוח) — מותר, אבל רק אחרי אישור מפורש (force).
+    // באספקה: מותר בלי אישור כל עוד מה שחוזר לא עובר את מה שדווח כמוכן (ready_quantity)
+    const readyEnough = bag.ready_at || (bag.kind === "supply" && (bag.returned_quantity || 0) + rq.qty <= (bag.ready_quantity || 0));
+    if (!readyEnough && !force) {
+      return { bag_code: code, ok: false, needs_confirm: true, bag: serializeBag(bag), error: bag.kind === "supply" && bag.ready_quantity
+        ? `דווחו כמוכנות רק ${bag.ready_quantity} (כבר הוחזרו ${bag.returned_quantity || 0})` : "שקית זו לא דווחה כנבדקה" };
+    }
+    await returnBag(bag, bag.result || null, rq.qty, detail);
+    const fresh = await loadBag(code);
+    return { bag_code: code, ok: true, partial: fresh.status !== "returned", returned_now: rq.qty, bag: serializeBag(fresh) };
+  } catch (e) {
+    return { bag_code: code, ok: false, error: e.message };
+  }
+}
+
 // סימון מרובה מרשימה (במקום סריקה) — מיכאל יכול לעבור על "ממתין לאיסוף"/"מה אצלי" ולסמן
 // V על כמה שקיות בבת אחת, במקום לסרוק כל אחת. action נקבע לפי הרשימה שבה מסמנים (לא ניחוש).
 router.post("/bulk-scan", asyncHandler(async (req, res) => {
@@ -258,54 +299,7 @@ router.post("/bulk-scan", asyncHandler(async (req, res) => {
   for (const entry of bag_codes) {
     const code = typeof entry === "object" && entry ? String(entry.bag_code || "") : String(entry);
     const quantity = typeof entry === "object" && entry ? entry.quantity : undefined;
-    try {
-      const bag = await loadBag(code);
-      if (!bag) {
-        results.push({ bag_code: code, ok: false, error: "קוד לא מוכר" });
-        continue;
-      }
-      if (action === "pickup") {
-        if (bag.status !== "waiting_pickup") {
-          // שקית שכבר אצל מיכאל ומוכנה — כנראה חזרה פיזית לחנות; מכוונים לקליטה הנכונה במקום "איסוף"
-          const hint = bag.status === "with_supplier"
-            ? (bag.ready_at ? ". אם היא חזרה לחנות — לקלוט אותה בסריקה בדף החנות (פעולות מהירות), או כאן ב'מסירה לחנות'" : ". אם היא חזרה לחנות — 'מסירה לחנות' בלשונית 'אצלי'")
-            : "";
-          results.push({ bag_code: code, ok: false, error: "השקית לא ממתינה לאיסוף — " + bagStateText(bag) + hint, status: bag.status });
-          continue;
-        }
-        await pickupBag(bag);
-      } else {
-        if (bag.status !== "with_supplier") {
-          results.push({ bag_code: code, ok: false, error: "השקית לא אצל הספק — " + bagStateText(bag), status: bag.status });
-          continue;
-        }
-        if (bag.kind === "supply" && ask_quantity && (quantity == null || quantity === "")) {
-          results.push({ bag_code: code, ok: false, needs_quantity: true, error: "כמה חוזרות?", bag: serializeBag(bag) });
-          continue;
-        }
-        const rq = returnQuantity(bag, quantity);
-        if (rq.error) {
-          results.push({ bag_code: code, ok: false, error: rq.error });
-          continue;
-        }
-        // מסירה לחנות של שקית שהתוכנה של הספק עוד לא שחררה (אין דוח) — מותר, אבל רק אחרי אישור מפורש (force).
-        // באספקה: מותר בלי אישור כל עוד מה שחוזר לא עובר את מה שדווח כמוכן (ready_quantity)
-        const readyEnough = bag.ready_at || (bag.kind === "supply" && (bag.returned_quantity || 0) + rq.qty <= (bag.ready_quantity || 0));
-        if (!readyEnough && !force) {
-          results.push({ bag_code: code, ok: false, needs_confirm: true, error: bag.kind === "supply" && bag.ready_quantity
-            ? `דווחו כמוכנות רק ${bag.ready_quantity} (כבר הוחזרו ${bag.returned_quantity || 0})` : "שקית זו לא דווחה כנבדקה" });
-          continue;
-        }
-        await returnBag(bag, bag.result || null, rq.qty);
-        const fresh = await loadBag(code);
-        results.push({ bag_code: code, ok: true, partial: fresh.status !== "returned", returned_now: rq.qty, bag: serializeBag(fresh) });
-        continue;
-      }
-      const fresh = await loadBag(code);
-      results.push({ bag_code: code, ok: true, bag: serializeBag(fresh) });
-    } catch (e) {
-      results.push({ bag_code: code, ok: false, error: e.message });
-    }
+    results.push(await supplierScanOne(action, code, quantity, { force, ask_quantity }));
   }
   // תיעוד כישלונות ביומן השרת (קוד שקית + סיבה, בלי פרטי לקוח) — לאבחון כשמשהו "לא מצליח"
   for (const r of results) if (!r.ok) console.log(`bulk-scan ${action} failed: ${r.bag_code} — ${r.error}`);

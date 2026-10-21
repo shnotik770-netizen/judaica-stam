@@ -11,6 +11,7 @@ import { logActivity, snapshotBagStates, BAG_STATE_FIELDS } from "../lib/activit
 import { getSetting, setSetting } from "../lib/settings.js";
 import { cleanVariant, variantText, cleanMezuzahCases, VARIANT_FIELDS } from "../lib/variant.js";
 import { ITEM_TYPES, ITEM_TYPE_LABELS } from "../lib/itemTypes.js";
+import { supplierScanOne } from "./supplier.js";
 
 export const router = express.Router();
 // ללא אימות בכוונה — החלטת החנות: מי שיש לו גישה לאתר יכול ליצור הזמנות, בלי קוד API.
@@ -418,8 +419,8 @@ router.post("/scan", asyncHandler(async (req, res) => {
     res.status(400).json({ error: "bag_codes נדרש" });
     return;
   }
-  if (!["notify_manual", "notify_sms", "collect", "receive"].includes(action)) {
-    res.status(400).json({ error: "action חייב להיות notify_manual, notify_sms, collect או receive" });
+  if (!["notify_manual", "notify_sms", "collect", "receive", "give"].includes(action)) {
+    res.status(400).json({ error: "action חייב להיות notify_manual, notify_sms, collect, receive או give" });
     return;
   }
 
@@ -432,27 +433,34 @@ router.post("/scan", asyncHandler(async (req, res) => {
     }
     const customer = { first_name: bag.first_name, last_name: bag.last_name, phone: bag.phone };
 
-    // "📥 קבלה מהספק": שקית שחזרה פיזית ממיכאל לחנות — נרשמת "הוחזרה". מוכנה אצלו — מיד; לא דווחה כמוכנה — רק באישור (force)
+    const base = { bag_code: code, order_number: bag.order_number, item_type: bag.item_type, quantity: bag.quantity, customer };
+
+    // "📤 מסירה למיכאל" — כמו "איסוף" בדף של מיכאל (אותה פונקציה בדיוק)
+    if (action === "give") {
+      const r = await supplierScanOne("pickup", code, undefined, { from: "store" });
+      results.push(r.ok ? { ...base, ok: true, action: "given" } : { ...base, ok: false, error: r.error });
+      continue;
+    }
+
+    // "📥 איסוף ממיכאל" — כמו "מסירה לחנות" בדף של מיכאל (אותה פונקציה בדיוק): לא דווחה כמוכנה — רק באישור (force);
+    // אספקה מסופר — שואלים כמה הגיעו (quantities[code]), אפשר חלק מהכמות
     if (action === "receive") {
       if (bag.status === "returned" || bag.status === "delivered_direct") {
-        results.push({ bag_code: code, ok: true, action: "duplicate", order_number: bag.order_number, item_type: bag.item_type, quantity: bag.quantity, customer,
+        results.push({ ...base, ok: true, action: "duplicate",
           message: bag.status === "returned" ? "כבר התקבלה בחנות" : "נמסרה ללקוח ישירות ע\"י מיכאל" });
         continue;
       }
       if (bag.status === "waiting_pickup") {
-        results.push({ bag_code: code, ok: false, error: "השקית עוד לא נאספה ע\"י מיכאל — היא אמורה להיות בחנות" });
+        results.push({ ...base, ok: false, error: "השקית עוד לא נמסרה למיכאל — היא אמורה להיות בחנות" });
         continue;
       }
-      if (bag.kind === "supply") {
-        results.push({ bag_code: code, ok: false, error: "אספקה מסופר — הקליטה לפי כמות, דרך 'מסירה לחנות' בדף של מיכאל" });
-        continue;
-      }
-      if (!bag.ready_at && !force) {
-        results.push({ bag_code: code, ok: true, action: "not_ready", order_number: bag.order_number, item_type: bag.item_type, quantity: bag.quantity, customer });
-        continue;
-      }
-      await receiveReadyBag(bag, bag.ready_at ? "התקבל בחנות (קבלה מהספק)" : "התקבל בחנות (קבלה מהספק) — לא דווח כמוכן אצל מיכאל");
-      results.push({ bag_code: code, ok: true, action: "received", order_number: bag.order_number, item_type: bag.item_type, quantity: bag.quantity, customer });
+      const quantity = req.body?.quantities?.[code];
+      const r = await supplierScanOne("return", code, quantity, { force, ask_quantity: true, detail: "איסוף ממיכאל בחנות" });
+      const q = r.bag ? { kind: r.bag.kind, returned_quantity: r.bag.returned_quantity, ready_quantity: r.bag.ready_quantity, remaining_quantity: r.bag.remaining_quantity } : {};
+      if (r.needs_quantity) results.push({ ...base, ...q, ok: true, action: "needs_quantity", quantity_asked: quantity ?? null });
+      else if (r.needs_confirm) results.push({ ...base, ...q, ok: true, action: "not_ready", message: r.error, quantity_asked: quantity ?? null });
+      else if (r.ok) results.push({ ...base, ...q, ok: true, action: "received", partial: r.partial, returned_now: r.returned_now });
+      else results.push({ ...base, ok: false, error: r.error });
       continue;
     }
 
