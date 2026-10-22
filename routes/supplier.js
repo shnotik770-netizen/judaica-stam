@@ -303,6 +303,13 @@ router.post("/bulk-scan", asyncHandler(async (req, res) => {
   }
   // תיעוד כישלונות ביומן השרת (קוד שקית + סיבה, בלי פרטי לקוח) — לאבחון כשמשהו "לא מצליח"
   for (const r of results) if (!r.ok) console.log(`bulk-scan ${action} failed: ${r.bag_code} — ${r.error}`);
+  // וגם ביומן הפעולות של השקית (scan_failed) — שאפשר לראות בהיסטוריה מה ניסו ולמה לא עבד.
+  // שאלת כמות / בקשת אישור הן לא כישלון — לא נרשמות
+  const where = req.get("sec-fetch-mode") || req.get("sec-fetch-site") ? "דף מיכאל" : "התוכנה של מיכאל";
+  for (const r of results) {
+    if (r.ok || r.needs_quantity || r.needs_confirm) continue;
+    await logActivity(r.bag_code, r.bag?.order_number, "scan_failed", `${where} · ${action === "pickup" ? "איסוף" : "מסירה לחנות"} נכשל — ${r.error}`);
+  }
   res.json({ results });
 }));
 

@@ -1859,10 +1859,10 @@ const LOG_ACTION_LABELS = {
   picked_up: 'נאסף ע"י מיכאל', released: 'מוכן אצל מיכאל (שוחרר מהתוכנה)', returned: 'הוחזר ממיכאל', returned_partial: 'הוחזר חלקית ממיכאל', ready_partial: 'מוכן חלקית אצל מיכאל',
   customer_notified: 'עודכן ללקוח', customer_collected: 'נאסף ע"י לקוח',
   customer_linked: 'מיכאל דיווח מספר לקוח', manual_fix: 'תיקון ידני', settings_changed: 'הגדרה עודכנה',
-  report_received: '📋 התקבל דוח ממיכאל', print_failed: '⚠️ הדפסת מדבקה נכשלה', sms_failed: '⚠️ SMS ללקוח לא נשלח',
+  report_received: '📋 התקבל דוח ממיכאל', print_failed: '⚠️ הדפסת מדבקה נכשלה', sms_failed: '⚠️ SMS ללקוח לא נשלח', scan_failed: '⚠️ סריקה נכשלה',
   supplier_update: '✏️ מיכאל תיקן פרטים', supplier_note: '💬 הערה ממיכאל', bag_edited: '✏️ שונה בחנות', payment_added: '💰 התקבל תשלום', payment_deleted: '💰 תשלום נמחק', delivered_direct: '🤝 נמסר ללקוח ע"י מיכאל (לא דרך החנות)',
 };
-const LOG_ERROR_ACTIONS = new Set(['print_failed', 'sms_failed']);
+const LOG_ERROR_ACTIONS = new Set(['print_failed', 'sms_failed', 'scan_failed']);
 // בפעולות האלה הפירוט הטכני לא מעניין (הדוח עצמו בכפתור "דוח ממיכאל") — מציגים רק את שם הפעולה והזמן.
 // בתיקון פרטים (supplier_update) הפירוט הוא בדיוק מה שהשתנה, ולכן הוא כן מוצג.
 const LOG_HIDE_DETAIL = new Set(['picked_up', 'released', 'returned', 'report_received']);

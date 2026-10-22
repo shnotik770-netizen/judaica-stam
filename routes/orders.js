@@ -411,6 +411,9 @@ router.get("/sms-preview", asyncHandler(async (req, res) => {
   });
 }));
 
+const SCAN_ACTION_LABELS = {
+  give: "מסירה למיכאל", receive: "איסוף ממיכאל", notify_manual: "לקוח עודכן", notify_sms: "דיווח ללקוח (SMS)", collect: "מסירה ללקוח",
+};
 router.post("/scan", asyncHandler(async (req, res) => {
   const { bag_codes, action, force } = req.body || {};
   // הודעה אישית (מצב "✓ הודעה אישית" בפעולה מהירה) — במקום התבנית; ב-notify_manual רק מוחזרת (לוואטסאפ)
@@ -419,7 +422,7 @@ router.post("/scan", asyncHandler(async (req, res) => {
     res.status(400).json({ error: "bag_codes נדרש" });
     return;
   }
-  if (!["notify_manual", "notify_sms", "collect", "receive", "give"].includes(action)) {
+  if (!SCAN_ACTION_LABELS[action]) {
     res.status(400).json({ error: "action חייב להיות notify_manual, notify_sms, collect, receive או give" });
     return;
   }
@@ -533,6 +536,11 @@ router.post("/scan", asyncHandler(async (req, res) => {
     results.push({ bag_code: code, ok: true, action: "collected", order_number: bag.order_number, item_type: bag.item_type, quantity: bag.quantity, customer });
   }
 
+  // סריקה שנכשלה — נרשמת ביומן הפעולות של השקית (scan_failed) עם הסיבה. SMS שנכשל כבר נרשם כ-sms_failed
+  for (const r of results) {
+    if (r.ok || r.sms_failed) continue;
+    await logActivity(r.bag_code, r.order_number, "scan_failed", `דף החנות · ${SCAN_ACTION_LABELS[action]} נכשל — ${r.error}`);
+  }
   res.json({ results });
 }));
 
